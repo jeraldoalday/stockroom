@@ -1,0 +1,48 @@
+import type { ReactNode } from "react";
+import { NavLink } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+
+const navItems = [
+  { to: "/", label: "Dashboard" },
+  { to: "/products", label: "Products" },
+];
+
+export function AppShell({ children }: { children: ReactNode }) {
+  const { user, logout } = useAuth();
+
+  return (
+    <div className="min-h-screen flex">
+      <aside className="w-56 bg-white border-r border-gray-200 flex flex-col">
+        <div className="px-4 py-5 text-lg font-semibold text-brand-700">StockRoom</div>
+        <nav className="flex-1 px-2 space-y-1">
+          {navItems.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.to === "/"}
+              className={({ isActive }) =>
+                `block rounded-md px-3 py-2 text-sm font-medium ${
+                  isActive ? "bg-brand-50 text-brand-700" : "text-gray-600 hover:bg-gray-100"
+                }`
+              }
+            >
+              {item.label}
+            </NavLink>
+          ))}
+        </nav>
+        <div className="px-4 py-4 border-t border-gray-200 text-sm">
+          <div className="font-medium">{user?.name}</div>
+          <div className="text-gray-500">{user?.email}</div>
+          <button
+            onClick={logout}
+            className="mt-2 text-brand-600 hover:underline"
+            type="button"
+          >
+            Sign out
+          </button>
+        </div>
+      </aside>
+      <main className="flex-1 p-8">{children}</main>
+    </div>
+  );
+}

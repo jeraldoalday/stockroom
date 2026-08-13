@@ -20,11 +20,13 @@ export function verifyPassword(plain: string, hash: string): Promise<boolean> {
 }
 
 export function signAccessToken(payload: AccessTokenPayload): string {
-  return jwt.sign(payload, env.jwtAccessSecret, { expiresIn: env.jwtAccessTtl });
+  const options: jwt.SignOptions = { expiresIn: env.jwtAccessTtl as jwt.SignOptions["expiresIn"] };
+  return jwt.sign(payload, env.jwtAccessSecret, options);
 }
 
 export function signRefreshToken(payload: { sub: string }): string {
-  return jwt.sign(payload, env.jwtRefreshSecret, { expiresIn: env.jwtRefreshTtl });
+  const options: jwt.SignOptions = { expiresIn: env.jwtRefreshTtl as jwt.SignOptions["expiresIn"] };
+  return jwt.sign(payload, env.jwtRefreshSecret, options);
 }
 
 export function verifyAccessToken(token: string): AccessTokenPayload {

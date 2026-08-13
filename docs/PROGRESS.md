@@ -22,7 +22,20 @@ appends a new entry when it finishes.
 - Python FastAPI service skeleton with a health check and DB read connection.
 - React app shell: routing, auth pages, API client, protected routes.
 
+- GitHub Actions CI running backend tests, python-service tests, and the
+  frontend production build on every push.
+- All three test/build steps verified locally: backend 13/13 Jest tests
+  pass, python-service pytest passes, frontend `tsc -b && vite build`
+  succeeds cleanly.
+
 **Next (Day 2):** Locations, Suppliers, Customers CRUD; InventoryItem model
 wired to real stock queries per location.
 
-**Blockers/decisions carried forward:** none.
+**Blockers/decisions carried forward:**
+- No Docker/Postgres available in the dev sandbox that built Day 1, so
+  backend tests run against an in-memory Prisma mock rather than a real
+  database — this is intentional (fast, no infra dependency) but true
+  integration coverage against Postgres should still happen in CI or a
+  real dev machine before this ships to a customer.
+- react-router-dom pinned to v7 (not v6) after `npm audit` flagged a
+  moderate CVE in v6 with no v6 backport available.

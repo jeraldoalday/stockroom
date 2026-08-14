@@ -39,3 +39,88 @@ wired to real stock queries per location.
   real dev machine before this ships to a customer.
 - react-router-dom pinned to v7 (not v6) after `npm audit` flagged a
   moderate CVE in v6 with no v6 backport available.
+
+## Day 2–6, and a slice of Day 7 — 2026-08-14
+
+**Planned:** Day 2 (Locations/Suppliers/Customers CRUD, InventoryItem stock
+queries) through Day 6 (low-stock alerts, dashboard) of the build plan.
+
+**Shipped (backend, F3-F9 all now live):**
+- Locations, Suppliers, Customers: full tenant-scoped CRUD. Locations
+  enforce a single-default-per-org invariant (moving the default is
+  transactional); deleting a location is blocked if it's the org's last
+  one, its current default, or still holds inventory. Suppliers/customers
+  block deletion once they have order history.
+- `GET /api/inventory` — stock query layer over `InventoryItem`, filterable
+  by location/product.
+- **StockMovement engine** (`POST /api/stock-movements`,
+  `POST /api/stock-movements/transfer`, `GET /api/stock-movements`):
+  RECEIVE, SALE, ADJUSTMENT, and a transactional TRANSFER_OUT/TRANSFER_IN
+  pair. `InventoryItem.quantity` is now only ever mutated inside the same
+  transaction as the StockMovement row that explains the change (via a
+  shared `applyMovementDelta` helper in `lib/inventory.ts`), and every path
+  rejects a result that would take stock negative. This is the audit-trail
+  backbone the NFR in PRD §7 calls for.
+- **Purchase orders** (F6): draft → ordered → received, with partial
+  receiving. Receiving posts a RECEIVE movement per line and auto-advances
+  status to PARTIALLY_RECEIVED or RECEIVED. Creation/editing/cancelling is
+  Owner-gated; receiving is open to any authenticated user.
+- **Sales orders** (F7): draft → fulfilled, with an over-sell guard —
+  every line's stock at the order's location is checked before any
+  movement is posted, so a short line never partially fulfills. Left
+  ungated by role (fulfilling sales orders is an explicit Staff task in
+  the PRD's persona model, unlike PO management).
+- **Dashboard** (F8/F9): `GET /api/dashboard/summary` (total stock value,
+  active product count, low-stock count, 10 most recent movements) and
+  `GET /api/dashboard/low-stock` (paginated, sorted by scarcity).
+- 29 new backend tests (66 total, all passing), covering tenant isolation,
+  the over-sell/negative-stock guards, and every status transition.
+
+**Shipped (frontend, start of Day 7):**
+- `DashboardPage` now calls the new dashboard endpoints instead of
+  showing the Day-1 placeholder: stat cards (stock value, active
+  products, low-stock count), a low-stock table, and a recent-activity
+  feed.
+- Verified in an actual browser (not just `tsc`/`vite build`): stood up a
+  real local Postgres (see below), ran both dev servers, and drove
+  signup → create product → RECEIVE stock → dashboard through
+  Playwright, confirming the stat cards and tables reflect real data.
+
+**Next (rest of Day 7, then Day 8-9):** Frontend screens for the
+StockMovement engine, purchase orders, and sales orders — currently only
+Products and the dashboard have UI; Locations/Suppliers/Customers/
+Inventory/StockMovements/PurchaseOrders/SalesOrders are backend-only so
+far. After that: CSV import/export and the sales/stock trend report in
+the Python service (Day 10-11).
+
+**Blockers/decisions:**
+- **No Docker daemon in this sandbox either**, but `postgresql-16` is
+  installed locally and unused — started it directly
+  (`pg_ctlcluster 16 main start`), created a `stockroom` role/database
+  matching `backend/.env.example`, and ran the first
+  `prisma migrate dev` (now committed under `backend/prisma/migrations/`).
+  That migration didn't exist before this session; every real deploy
+  needs it to run `prisma migrate deploy` instead of `db push`. Local dev
+  without Docker: start the cluster, then follow `backend/.env.example`.
+- PO create/edit/cancel is Owner-only; PO receiving and all sales-order
+  actions are open to any authenticated user. This mirrors the PRD's
+  persona text (Owner "manages suppliers and purchase orders", Staff
+  "receives stock, fulfills sales orders") rather than any single
+  functional requirement, since F1-F9 don't spell out per-endpoint RBAC.
+- Deliberately did **not** hide cost/margin fields from STAFF on the new
+  dashboard endpoint. The persona section says Staff has "no access to
+  cost/margin data by default," but Day 1's Products endpoints already
+  return full cost data to any authenticated org member — hiding it on
+  just the one new endpoint would be an inconsistent, half-applied rule.
+  Real field-level RBAC needs to land everywhere at once; that's exactly
+  what Day 13 ("RBAC hardening") in the plan is for, so left as-is until
+  then and flagged here rather than silently skipped.
+- Low-stock math compares a product's *summed* quantity across all
+  locations to its (location-agnostic) `reorderPoint`, since `reorderPoint`
+  is a product-level field in the current schema, not per-location. Revisit
+  if/when per-location reorder points are needed.
+- Dashboard aggregation (`lib` in `dashboard.routes.ts`) sums stock in JS
+  rather than a SQL `groupBy`, because the mock Prisma client used in tests
+  can't express `groupBy`. Fine at the ~10k SKU scale the NFR targets;
+  flagged in a code comment as the spot to move to a real aggregate query
+  if that changes.

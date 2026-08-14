@@ -5,6 +5,10 @@ import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 import authRoutes from "./routes/auth.routes";
 import categoriesRoutes from "./routes/categories.routes";
 import productsRoutes from "./routes/products.routes";
+import locationsRoutes from "./routes/locations.routes";
+import suppliersRoutes from "./routes/suppliers.routes";
+import customersRoutes from "./routes/customers.routes";
+import inventoryRoutes from "./routes/inventory.routes";
 
 export function createApp() {
   const app = express();
@@ -17,6 +21,10 @@ export function createApp() {
   app.use("/api/auth", authRoutes);
   app.use("/api/categories", categoriesRoutes);
   app.use("/api/products", productsRoutes);
+  app.use("/api/locations", locationsRoutes);
+  app.use("/api/suppliers", suppliersRoutes);
+  app.use("/api/customers", customersRoutes);
+  app.use("/api/inventory", inventoryRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

@@ -92,6 +92,7 @@ const tables = {
   customer: new Table(),
   product: new Table({ isActive: true, costCents: 0, priceCents: 0, reorderPoint: 0, reorderQty: 0 }),
   inventoryItem: new Table({ quantity: 0 }),
+  stockMovement: new Table(),
   purchaseOrder: new Table({ status: "DRAFT" }),
   salesOrder: new Table({ status: "DRAFT" }),
 };

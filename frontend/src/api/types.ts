@@ -43,3 +43,41 @@ export interface ProductListResponse {
   page: number;
   pageSize: number;
 }
+
+export interface Location {
+  id: string;
+  name: string;
+  address: string | null;
+  isDefault: boolean;
+}
+
+export type MovementType = "RECEIVE" | "SALE" | "TRANSFER_IN" | "TRANSFER_OUT" | "ADJUSTMENT";
+
+export interface StockMovement {
+  id: string;
+  type: MovementType;
+  quantity: number;
+  reason: string | null;
+  createdAt: string;
+  product?: Product;
+  location?: Location;
+}
+
+export interface DashboardSummary {
+  totalStockValueCents: number;
+  activeProductCount: number;
+  lowStockCount: number;
+  recentMovements: StockMovement[];
+}
+
+export interface LowStockEntry {
+  product: Product;
+  quantity: number;
+}
+
+export interface LowStockResponse {
+  items: LowStockEntry[];
+  total: number;
+  page: number;
+  pageSize: number;
+}

@@ -10,6 +10,7 @@ import suppliersRoutes from "./routes/suppliers.routes";
 import customersRoutes from "./routes/customers.routes";
 import inventoryRoutes from "./routes/inventory.routes";
 import stockMovementsRoutes from "./routes/stockMovements.routes";
+import purchaseOrdersRoutes from "./routes/purchaseOrders.routes";
 
 export function createApp() {
   const app = express();
@@ -27,6 +28,7 @@ export function createApp() {
   app.use("/api/customers", customersRoutes);
   app.use("/api/inventory", inventoryRoutes);
   app.use("/api/stock-movements", stockMovementsRoutes);
+  app.use("/api/purchase-orders", purchaseOrdersRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

@@ -1,37 +1,13 @@
 import { Router } from "express";
-import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { asyncHandler } from "../lib/asyncHandler";
 import { requireAuth } from "../middleware/auth";
 import { ApiError } from "../lib/errors";
+import { applyMovementDelta } from "../lib/inventory";
 
 const router = Router();
 router.use(requireAuth);
-
-// InventoryItem.quantity is a derived cache; it must only ever change here,
-// inside the same transaction as the StockMovement row that explains the
-// change. `delta` is the signed effect on quantity on hand.
-async function applyMovementDelta(
-  tx: Prisma.TransactionClient,
-  params: { organizationId: string; productId: string; locationId: string; delta: number }
-) {
-  const { organizationId, productId, locationId, delta } = params;
-  const existing = await tx.inventoryItem.findFirst({ where: { productId, locationId } });
-  const nextQuantity = (existing?.quantity ?? 0) + delta;
-  if (nextQuantity < 0) {
-    throw ApiError.badRequest("Insufficient stock at this location");
-  }
-
-  if (existing) {
-    await tx.inventoryItem.update({ where: { id: existing.id }, data: { quantity: nextQuantity } });
-  } else {
-    await tx.inventoryItem.create({
-      data: { organizationId, productId, locationId, quantity: nextQuantity },
-    });
-  }
-  return nextQuantity;
-}
 
 async function assertProductAndLocation(organizationId: string, productId: string, locationId: string) {
   const [product, location] = await Promise.all([

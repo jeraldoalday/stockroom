@@ -94,6 +94,7 @@ const tables = {
   inventoryItem: new Table({ quantity: 0 }),
   stockMovement: new Table(),
   purchaseOrder: new Table({ status: "DRAFT" }),
+  purchaseOrderLine: new Table({ quantityReceived: 0 }),
   salesOrder: new Table({ status: "DRAFT" }),
 };
 

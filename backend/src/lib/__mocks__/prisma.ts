@@ -96,6 +96,7 @@ const tables = {
   purchaseOrder: new Table({ status: "DRAFT" }),
   purchaseOrderLine: new Table({ quantityReceived: 0 }),
   salesOrder: new Table({ status: "DRAFT" }),
+  salesOrderLine: new Table(),
 };
 
 export const prisma = {

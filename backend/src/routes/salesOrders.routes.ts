@@ -1,0 +1,242 @@
+import { Router } from "express";
+import { z } from "zod";
+import { prisma } from "../lib/prisma";
+import { asyncHandler } from "../lib/asyncHandler";
+import { requireAuth } from "../middleware/auth";
+import { ApiError } from "../lib/errors";
+import { applyMovementDelta } from "../lib/inventory";
+
+const router = Router();
+router.use(requireAuth);
+
+// Unlike purchase orders (Owner-gated: supplier/PO management is an Owner
+// task per the PRD persona model), sales orders are open to STAFF too —
+// "fulfils sales orders" is explicitly a Staff responsibility.
+
+const listQuerySchema = z.object({
+  status: z.enum(["DRAFT", "FULFILLED", "CANCELLED"]).optional(),
+  customerId: z.string().optional(),
+  locationId: z.string().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(25),
+});
+
+router.get(
+  "/",
+  asyncHandler(async (req, res) => {
+    const query = listQuerySchema.parse(req.query);
+    const organizationId = req.auth!.organizationId;
+
+    const where = {
+      organizationId,
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.customerId ? { customerId: query.customerId } : {}),
+      ...(query.locationId ? { locationId: query.locationId } : {}),
+    };
+
+    const [items, total] = await Promise.all([
+      prisma.salesOrder.findMany({
+        where,
+        include: { customer: true },
+        orderBy: { createdAt: "desc" },
+        skip: (query.page - 1) * query.pageSize,
+        take: query.pageSize,
+      }),
+      prisma.salesOrder.count({ where }),
+    ]);
+
+    res.json({ items, total, page: query.page, pageSize: query.pageSize });
+  })
+);
+
+async function loadSalesOrderWithLines(organizationId: string, id: string) {
+  const salesOrder = await prisma.salesOrder.findFirst({ where: { id, organizationId } });
+  if (!salesOrder) {
+    throw ApiError.notFound("Sales order not found");
+  }
+  const lines = await prisma.salesOrderLine.findMany({ where: { salesOrderId: salesOrder.id } });
+  return { ...salesOrder, lines };
+}
+
+router.get(
+  "/:id",
+  asyncHandler(async (req, res) => {
+    const result = await loadSalesOrderWithLines(req.auth!.organizationId, req.params.id);
+    res.json(result);
+  })
+);
+
+const lineInputSchema = z.object({
+  productId: z.string(),
+  quantity: z.number().int().positive(),
+  unitPriceCents: z.number().int().min(0),
+});
+
+const createSchema = z.object({
+  customerId: z.string().optional().nullable(),
+  locationId: z.string(),
+  notes: z.string().max(1000).optional(),
+  lines: z.array(lineInputSchema).min(1),
+});
+
+router.post(
+  "/",
+  asyncHandler(async (req, res) => {
+    const body = createSchema.parse(req.body);
+    const organizationId = req.auth!.organizationId;
+
+    const location = await prisma.location.findFirst({ where: { id: body.locationId, organizationId } });
+    if (!location) {
+      throw ApiError.badRequest("locationId does not belong to this organization");
+    }
+    if (body.customerId) {
+      const customer = await prisma.customer.findFirst({ where: { id: body.customerId, organizationId } });
+      if (!customer) {
+        throw ApiError.badRequest("customerId does not belong to this organization");
+      }
+    }
+    for (const line of body.lines) {
+      const product = await prisma.product.findFirst({ where: { id: line.productId, organizationId } });
+      if (!product) {
+        throw ApiError.badRequest(`productId ${line.productId} does not belong to this organization`);
+      }
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const salesOrder = await tx.salesOrder.create({
+        data: {
+          organizationId,
+          customerId: body.customerId ?? null,
+          locationId: body.locationId,
+          notes: body.notes,
+          status: "DRAFT",
+        },
+      });
+      const lines = [];
+      for (const line of body.lines) {
+        lines.push(
+          await tx.salesOrderLine.create({
+            data: {
+              salesOrderId: salesOrder.id,
+              productId: line.productId,
+              quantity: line.quantity,
+              unitPriceCents: line.unitPriceCents,
+            },
+          })
+        );
+      }
+      return { ...salesOrder, lines };
+    });
+
+    res.status(201).json(result);
+  })
+);
+
+const patchSchema = z.object({
+  customerId: z.string().optional().nullable(),
+  notes: z.string().max(1000).optional().nullable(),
+});
+
+router.patch(
+  "/:id",
+  asyncHandler(async (req, res) => {
+    const body = patchSchema.parse(req.body);
+    const organizationId = req.auth!.organizationId;
+
+    const salesOrder = await prisma.salesOrder.findFirst({ where: { id: req.params.id, organizationId } });
+    if (!salesOrder) {
+      throw ApiError.notFound("Sales order not found");
+    }
+    if (salesOrder.status !== "DRAFT") {
+      throw ApiError.badRequest("Only a draft sales order can be edited");
+    }
+    if (body.customerId) {
+      const customer = await prisma.customer.findFirst({ where: { id: body.customerId, organizationId } });
+      if (!customer) {
+        throw ApiError.badRequest("customerId does not belong to this organization");
+      }
+    }
+
+    const updated = await prisma.salesOrder.update({ where: { id: salesOrder.id }, data: body });
+    res.json(updated);
+  })
+);
+
+router.post(
+  "/:id/cancel",
+  asyncHandler(async (req, res) => {
+    const organizationId = req.auth!.organizationId;
+    const salesOrder = await prisma.salesOrder.findFirst({ where: { id: req.params.id, organizationId } });
+    if (!salesOrder) {
+      throw ApiError.notFound("Sales order not found");
+    }
+    if (salesOrder.status !== "DRAFT") {
+      throw ApiError.badRequest("Only a draft sales order can be cancelled");
+    }
+
+    const updated = await prisma.salesOrder.update({ where: { id: salesOrder.id }, data: { status: "CANCELLED" } });
+    res.json(updated);
+  })
+);
+
+// F7: fulfilling decrements stock and blocks an over-sell. Every line's
+// availability is checked up front so a short line never leaves the order
+// half-fulfilled.
+router.post(
+  "/:id/fulfill",
+  asyncHandler(async (req, res) => {
+    const organizationId = req.auth!.organizationId;
+    const actorId = req.auth!.userId;
+
+    const salesOrder = await prisma.salesOrder.findFirst({ where: { id: req.params.id, organizationId } });
+    if (!salesOrder) {
+      throw ApiError.notFound("Sales order not found");
+    }
+    if (salesOrder.status !== "DRAFT") {
+      throw ApiError.badRequest("Only a draft sales order can be fulfilled");
+    }
+
+    const lines = await prisma.salesOrderLine.findMany({ where: { salesOrderId: salesOrder.id } });
+
+    for (const line of lines) {
+      const item = await prisma.inventoryItem.findFirst({
+        where: { organizationId, productId: line.productId, locationId: salesOrder.locationId },
+      });
+      const available = item?.quantity ?? 0;
+      if (available < line.quantity) {
+        throw ApiError.badRequest(
+          `Insufficient stock for product ${line.productId}: ${available} available, ${line.quantity} requested`
+        );
+      }
+    }
+
+    await prisma.$transaction(async (tx) => {
+      for (const line of lines) {
+        await applyMovementDelta(tx, {
+          organizationId,
+          productId: line.productId,
+          locationId: salesOrder.locationId,
+          delta: -line.quantity,
+        });
+        await tx.stockMovement.create({
+          data: {
+            organizationId,
+            productId: line.productId,
+            locationId: salesOrder.locationId,
+            type: "SALE",
+            quantity: -line.quantity,
+            actorId,
+            salesOrderId: salesOrder.id,
+            reason: `Fulfilling SO ${salesOrder.id}`,
+          },
+        });
+      }
+      await tx.salesOrder.update({ where: { id: salesOrder.id }, data: { status: "FULFILLED" } });
+    });
+
+    const result = await loadSalesOrderWithLines(organizationId, salesOrder.id);
+    res.json(result);
+  })
+);
+
+export default router;

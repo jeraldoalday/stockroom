@@ -124,3 +124,62 @@ the Python service (Day 10-11).
   can't express `groupBy`. Fine at the ~10k SKU scale the NFR targets;
   flagged in a code comment as the spot to move to a real aggregate query
   if that changes.
+
+## Day 7 (finish) — 2026-08-15
+
+**Planned:** Finish Day 7 ("Frontend: auth pages, app shell, products &
+inventory screens") — every Day 2-6 backend endpoint (Locations, Suppliers,
+Customers, Inventory, StockMovements) was still backend-only.
+
+**Shipped (frontend):**
+- `LocationsPage`: list, create, delete, and switch the org's default
+  location (the "make default" action calls the existing `PATCH
+  /locations/:id { isDefault: true }`, which server-side clears the old
+  default transactionally).
+- `SuppliersPage` / `CustomersPage`: near-identical search + create + delete
+  screens, mirroring `ProductsPage`'s existing layout and form conventions.
+- `InventoryPage`: read-only stock-on-hand table, filterable by location,
+  over `GET /inventory`.
+- `StockMovementsPage`: two forms — record a RECEIVE/SALE/ADJUSTMENT
+  movement (ADJUSTMENT requires a reason, matching the backend's own
+  validation) and transfer stock between two locations — plus a movement
+  history table. Both forms invalidate the `inventory` and `dashboard`
+  query caches on success so other open screens stay in sync.
+- `AppShell` nav extended with Inventory, Stock Movements, Locations,
+  Suppliers, Customers; new protected routes wired into `App.tsx`.
+- Extended `fetchProducts` to accept a `{ pageSize }` option (needed to pull
+  a full product list for the stock-movement form's `<select>`) without
+  breaking its existing `search?: string` call sites.
+
+**Verified:** `tsc --noEmit` and the full Jest suite (66/66) on the backend
+(no backend changes this session, confirmed as a baseline), `pytest` on the
+python-service, and `tsc -b && vite build` on the frontend — all clean.
+Beyond the build/test commands, stood up a real local Postgres (same
+`pg_ctlcluster 16 main start` + role/db setup as Day 2-6, this sandbox has
+no Docker either) and drove the new screens with Playwright end-to-end:
+signup → create two locations → switch the default → delete a throwaway
+location → create a supplier and a customer → create a product → receive
+20 units at one location → transfer 8 units to a second location →
+confirmed the Inventory page reads back 12/8 correctly and the Dashboard
+still loads. No console or network errors other than the expected
+favicon 404.
+
+**Next (Day 8):** Frontend purchase-order and sales-order flows — these are
+the two remaining backend-only surfaces. They're a bigger lift than today's
+CRUD screens (multi-line order forms, status-transition actions like
+order/receive/fulfill/cancel, partial receiving), so left for the next
+session rather than rushing a shallow version of both in the time left
+here.
+
+**Blockers/decisions:**
+- Went with simple delete buttons (no confirm dialog) for
+  Locations/Suppliers/Customers rows, consistent with how minimal
+  `ProductsPage` already is (no edit UI at all yet). The backend's own
+  guardrails (can't delete the last/default location, can't delete a
+  supplier/customer with order history) are the actual safety net; a
+  confirm-dialog is cheap UI polish that can land anytime and isn't
+  blocking anything.
+- `StockMovementsPage`'s history table has no pagination controls yet even
+  though the backend supports `page`/`pageSize` — fine at today's data
+  volumes; revisit alongside Day 13's general polish pass if it becomes a
+  problem before then.

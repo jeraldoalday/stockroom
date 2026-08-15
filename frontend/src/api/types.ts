@@ -51,6 +51,51 @@ export interface Location {
   isDefault: boolean;
 }
 
+export interface Supplier {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+}
+
+export interface SupplierListResponse {
+  items: Supplier[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface Customer {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+}
+
+export interface CustomerListResponse {
+  items: Customer[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface InventoryItem {
+  id: string;
+  productId: string;
+  locationId: string;
+  quantity: number;
+  updatedAt: string;
+  product?: Product;
+  location?: Location;
+}
+
+export interface InventoryListResponse {
+  items: InventoryItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 export type MovementType = "RECEIVE" | "SALE" | "TRANSFER_IN" | "TRANSFER_OUT" | "ADJUSTMENT";
 
 export interface StockMovement {
@@ -61,6 +106,13 @@ export interface StockMovement {
   createdAt: string;
   product?: Product;
   location?: Location;
+}
+
+export interface StockMovementListResponse {
+  items: StockMovement[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 export interface DashboardSummary {

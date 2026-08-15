@@ -5,6 +5,11 @@ import { useAuth } from "../context/AuthContext";
 const navItems = [
   { to: "/", label: "Dashboard" },
   { to: "/products", label: "Products" },
+  { to: "/inventory", label: "Inventory" },
+  { to: "/stock-movements", label: "Stock Movements" },
+  { to: "/locations", label: "Locations" },
+  { to: "/suppliers", label: "Suppliers" },
+  { to: "/customers", label: "Customers" },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {

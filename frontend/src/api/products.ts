@@ -1,10 +1,14 @@
 import { apiClient } from "./client";
 import type { Category, Product, ProductListResponse } from "./types";
 
-export async function fetchProducts(search?: string): Promise<ProductListResponse> {
-  const res = await apiClient.get<ProductListResponse>("/products", {
-    params: search ? { search } : undefined,
-  });
+export interface ProductQuery {
+  search?: string;
+  pageSize?: number;
+}
+
+export async function fetchProducts(query?: string | ProductQuery): Promise<ProductListResponse> {
+  const params = typeof query === "string" ? (query ? { search: query } : undefined) : query;
+  const res = await apiClient.get<ProductListResponse>("/products", { params });
   return res.data;
 }
 

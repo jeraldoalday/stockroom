@@ -183,3 +183,115 @@ here.
   though the backend supports `page`/`pageSize` — fine at today's data
   volumes; revisit alongside Day 13's general polish pass if it becomes a
   problem before then.
+
+## Day 8, 10-11 — 2026-08-16
+
+**Planned:** Day 8 (frontend purchase-order and sales-order flows) plus
+Day 10-11 (Python service: CSV import/export, sales/stock trend report).
+Day 9's items (dashboard, low-stock view, stock movement history) were
+already shipped incidentally during Day 2-7, so this session skipped
+straight past it.
+
+**Shipped — Day 8, purchase/sales order UI:**
+- `PurchaseOrdersPage`: multi-line create form (supplier, notes, dynamic
+  product/qty/unit-cost rows), an expandable per-row detail panel that
+  lazy-fetches `GET /purchase-orders/:id` (the list endpoint doesn't
+  include lines), mark-as-ordered/cancel actions gated to `OWNER` to
+  mirror the backend's own `requireRole`, and a receive form that
+  defaults each line's input to its remaining quantity.
+- `SalesOrdersPage`: same shape (create/expand/detail) but ungated —
+  fulfilling sales orders is an explicit Staff task per the PRD persona
+  model, same reasoning already applied on the backend.
+- New nav entries and routes for both; `frontend/src/api/purchaseOrders.ts`
+  and `salesOrders.ts` added alongside the existing per-resource API
+  modules.
+
+**Shipped — Day 10-11, CSV import/export + trend report (F10, F11):**
+- **Decision (architectural fork the PRD didn't resolve):** F10 needs a
+  write (CSV import creates/updates products), but PRD §8 says the Python
+  service is stateless and read-only against a SELECT-only DB role. Wrote
+  the import through the Node API instead (`POST /api/products/import`,
+  tenant-scoped, upserts by SKU, resolves/creates categories by name,
+  validates each row independently and returns `{created, updated, errors:
+  [{row, message}]}` rather than aborting the whole file on one bad row).
+  Export (products/stock/movements CSV) and the trend report are pure
+  reads, so those live in the Python service as the architecture doc
+  describes, and the frontend still never talks to it directly — new
+  `GET /api/reports/export/{products,stock,movements}` and
+  `GET /api/reports/trend` routes on the Node API proxy through
+  (`lib/pythonService.ts`), consistent with "frontend talks only to the
+  Node API" in PRD §8.
+- Added a shared-secret `x-internal-key` header
+  (`PYTHON_SERVICE_INTERNAL_KEY` / `INTERNAL_API_KEY`, matching defaults in
+  both `.env.example` files) so the Python service's report endpoints only
+  answer the Node backend, not arbitrary callers on the same network —
+  nothing in the PRD asked for this, but leaving report endpoints
+  unauthenticated felt like an obvious gap given the NFR's "no tenant can
+  ever read another tenant's rows" and every export/report query being
+  scoped by an `organization_id` the caller supplies.
+- Trend endpoint (`app/services/reports.py`) reports daily units sold vs.
+  received plus revenue, over a 7 or 30-day window. Revenue is only
+  attributable for `SALE` movements that came from fulfilling a sales
+  order (joined back to `sales_order_lines` via `salesOrderId` +
+  `productId` for the unit price) — a `SALE` movement posted directly via
+  `POST /stock-movements` carries no price and contributes 0 revenue.
+  That's a real gap in the current data model (a manual stock-movement
+  sale has no recorded price), not a bug in the report; flagging it here
+  rather than fixing it silently, since fixing it properly means either
+  adding a price field to `StockMovement` or requiring a price for
+  direct-recorded sales, and that's a schema/API decision bigger than this
+  slice.
+- Frontend: `ProductsPage` gets an "Import CSV" button (file picker, no
+  new dependency — reads the file client-side with `File.text()` and
+  posts raw CSV text) and shows the created/updated/error-row summary
+  inline. New `ReportsPage`: 7/30-day toggle, stat cards, a lightweight
+  CSS-bar trend view (no charting library added — the existing dependency
+  set has none, and one view didn't seem worth introducing one for), and
+  three CSV export buttons that fetch through axios as a blob (a plain
+  `<a href>` can't carry the auth header) and trigger a browser download.
+- **Found and fixed a pre-existing bug** while verifying this against a
+  real Postgres: `python-service/.env.example`'s `DATABASE_URL` carried a
+  `?schema=public` suffix copied from the Node backend's Prisma-style URL,
+  but psycopg2/SQLAlchemy reject `schema` as an unknown connection option
+  outright. The Python service's DB connection has been silently broken
+  since Day 1 — masked because the only thing that touched the DB before
+  today was the health check, which explicitly tolerates and reports
+  `"degraded"` instead of failing. Removed the suffix from
+  `python-service/.env.example`.
+- 6 new backend tests (`productsImport.test.ts`, `reports.test.ts` — the
+  latter mocks `global.fetch` to test the proxy layer without a running
+  Python service) and 7 new python-service tests (`test_reports.py`,
+  overriding the `get_db` FastAPI dependency so these run with no live
+  database, same philosophy as the backend's in-memory Prisma mock).
+  84 backend tests and 7 python-service tests all green.
+
+**Verified:** `tsc --noEmit` + full Jest suite (backend), `pytest`
+(python-service), `tsc -b && vite build` (frontend) all clean. Beyond
+that, stood up local Postgres + all three services and drove two
+Playwright scripts end-to-end: (1) purchase order draft → order → receive
+with a correct inventory increase, sales order draft → fulfill with a
+correct inventory decrease, dashboard still loads after both; (2) CSV
+import (2 created, 1 row skipped for a missing SKU, error message shown),
+a receive + sale stock movement, the Reports page rendering a non-empty
+trend, and all three CSV exports downloading with the expected content
+(`IMP-1` in the products export, `Main Warehouse` in the stock export,
+`SALE`/`RECEIVE` in the movements export). No console/network errors in
+either run beyond the expected favicon 404.
+
+**Next (Day 12-14):** F12 (P2, simple moving-average reorder-quantity
+suggestion) is the last unimplemented PRD requirement; after that, Day
+13-14 in the plan are integration testing/RBAC hardening/seed data/docs
+and final polish/demo script — plus general polish items flagged in
+earlier entries (stock-movement history pagination, delete confirmation
+dialogs) are still open and reasonable to pick up alongside Day 13.
+
+**Blockers/decisions carried forward:**
+- Field-level RBAC (hiding cost/margin from STAFF) is still not
+  implemented anywhere, including the new CSV export/import endpoints —
+  same call as Day 2-6's entry: this needs to land everywhere at once as
+  part of Day 13, not piecemeal per endpoint.
+- No sandbox has had Docker across any session so far; every local
+  verification has used `pg_ctlcluster 16 main start` directly against
+  the sandbox's installed Postgres 16, and services/`.env` files are torn
+  down again at the end of each session (they're gitignored — verified
+  `.env` was never accidentally committed).

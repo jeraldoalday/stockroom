@@ -133,3 +133,59 @@ export interface LowStockResponse {
   page: number;
   pageSize: number;
 }
+
+export type PurchaseOrderStatus = "DRAFT" | "ORDERED" | "PARTIALLY_RECEIVED" | "RECEIVED" | "CANCELLED";
+
+export interface PurchaseOrderLine {
+  id: string;
+  productId: string;
+  quantityOrdered: number;
+  quantityReceived: number;
+  unitCostCents: number;
+  product?: Product;
+}
+
+export interface PurchaseOrder {
+  id: string;
+  supplierId: string;
+  status: PurchaseOrderStatus;
+  notes: string | null;
+  createdAt: string;
+  supplier?: Supplier;
+  lines?: PurchaseOrderLine[];
+}
+
+export interface PurchaseOrderListResponse {
+  items: PurchaseOrder[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export type SalesOrderStatus = "DRAFT" | "FULFILLED" | "CANCELLED";
+
+export interface SalesOrderLine {
+  id: string;
+  productId: string;
+  quantity: number;
+  unitPriceCents: number;
+  product?: Product;
+}
+
+export interface SalesOrder {
+  id: string;
+  customerId: string | null;
+  locationId: string;
+  status: SalesOrderStatus;
+  notes: string | null;
+  createdAt: string;
+  customer?: Customer;
+  lines?: SalesOrderLine[];
+}
+
+export interface SalesOrderListResponse {
+  items: SalesOrder[];
+  total: number;
+  page: number;
+  pageSize: number;
+}

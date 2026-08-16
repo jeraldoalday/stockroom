@@ -8,6 +8,8 @@ import { SuppliersPage } from "./pages/SuppliersPage";
 import { CustomersPage } from "./pages/CustomersPage";
 import { InventoryPage } from "./pages/InventoryPage";
 import { StockMovementsPage } from "./pages/StockMovementsPage";
+import { PurchaseOrdersPage } from "./pages/PurchaseOrdersPage";
+import { SalesOrdersPage } from "./pages/SalesOrdersPage";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 
 export function App() {
@@ -68,6 +70,22 @@ export function App() {
         element={
           <ProtectedRoute>
             <StockMovementsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/purchase-orders"
+        element={
+          <ProtectedRoute>
+            <PurchaseOrdersPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/sales-orders"
+        element={
+          <ProtectedRoute>
+            <SalesOrdersPage />
           </ProtectedRoute>
         }
       />

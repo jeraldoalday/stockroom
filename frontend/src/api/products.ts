@@ -31,3 +31,16 @@ export async function fetchCategories(): Promise<Category[]> {
   const res = await apiClient.get<Category[]>("/categories");
   return res.data;
 }
+
+export interface ImportProductsResult {
+  created: number;
+  updated: number;
+  errors: { row: number; message: string }[];
+}
+
+export async function importProductsCsv(csvText: string): Promise<ImportProductsResult> {
+  const res = await apiClient.post<ImportProductsResult>("/products/import", csvText, {
+    headers: { "Content-Type": "text/csv" },
+  });
+  return res.data;
+}

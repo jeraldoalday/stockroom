@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from typing import Iterator, Optional
 
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 
 from app.config import settings
 
@@ -34,3 +34,11 @@ def check_database_connection() -> bool:
         return True
     except Exception:
         return False
+
+
+# FastAPI dependency version of get_connection: report/export routes take
+# `conn: Connection = Depends(get_db)` so tests can override this one
+# dependency with a fake connection instead of needing a real database.
+def get_db() -> Iterator[Connection]:
+    with get_connection() as conn:
+        yield conn

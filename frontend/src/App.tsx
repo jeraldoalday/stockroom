@@ -10,6 +10,7 @@ import { InventoryPage } from "./pages/InventoryPage";
 import { StockMovementsPage } from "./pages/StockMovementsPage";
 import { PurchaseOrdersPage } from "./pages/PurchaseOrdersPage";
 import { SalesOrdersPage } from "./pages/SalesOrdersPage";
+import { ReportsPage } from "./pages/ReportsPage";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 
 export function App() {
@@ -86,6 +87,14 @@ export function App() {
         element={
           <ProtectedRoute>
             <SalesOrdersPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/reports"
+        element={
+          <ProtectedRoute>
+            <ReportsPage />
           </ProtectedRoute>
         }
       />

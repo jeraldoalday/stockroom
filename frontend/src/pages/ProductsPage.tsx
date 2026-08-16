@@ -1,8 +1,9 @@
-import { useState } from "react";
-import type { FormEvent } from "react";
+import { useRef, useState } from "react";
+import type { ChangeEvent, FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
-import { createProduct, fetchProducts } from "../api/products";
+import { createProduct, fetchProducts, importProductsCsv } from "../api/products";
+import type { ImportProductsResult } from "../api/products";
 import { isApiError } from "../api/errors";
 
 function formatCents(cents: number): string {
@@ -14,6 +15,10 @@ export function ProductsPage() {
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [importResult, setImportResult] = useState<ImportProductsResult | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const productsQuery = useQuery({
     queryKey: ["products", search],
@@ -44,18 +49,71 @@ export function ProductsPage() {
     });
   }
 
+  async function handleImport(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportError(null);
+    setImportResult(null);
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const result = await importProductsCsv(text);
+      setImportResult(result);
+      queryClient.invalidateQueries({ queryKey: ["products"] });
+    } catch (err) {
+      setImportError(isApiError(err) ? err.response?.data?.error ?? "Could not import CSV" : "Could not import CSV");
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
   return (
     <AppShell>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold text-gray-900">Products</h1>
-        <button
-          type="button"
-          onClick={() => setShowForm((v) => !v)}
-          className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
-        >
-          {showForm ? "Cancel" : "Add product"}
-        </button>
+        <div className="flex gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={handleImport}
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importing}
+            className="rounded-md border border-brand-600 px-4 py-2 text-sm font-medium text-brand-700 hover:bg-brand-50 disabled:opacity-50"
+          >
+            {importing ? "Importing..." : "Import CSV"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowForm((v) => !v)}
+            className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+          >
+            {showForm ? "Cancel" : "Add product"}
+          </button>
+        </div>
       </div>
+
+      {importError && <div className="mb-4 text-sm text-red-600">{importError}</div>}
+      {importResult && (
+        <div className="mb-4 rounded-md border border-gray-200 bg-white p-3 text-sm">
+          <div className="text-gray-700">
+            Imported: {importResult.created} created, {importResult.updated} updated
+            {importResult.errors.length > 0 ? `, ${importResult.errors.length} row(s) skipped` : ""}.
+          </div>
+          {importResult.errors.length > 0 && (
+            <ul className="mt-2 list-disc pl-5 text-red-600">
+              {importResult.errors.map((err) => (
+                <li key={err.row}>Row {err.row}: {err.message}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {showForm && (
         <form onSubmit={handleCreate} className="mb-6 grid grid-cols-2 gap-4 rounded-lg border border-gray-200 bg-white p-4">

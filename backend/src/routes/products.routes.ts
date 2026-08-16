@@ -1,9 +1,10 @@
-import { Router } from "express";
+import express, { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { asyncHandler } from "../lib/asyncHandler";
 import { requireAuth } from "../middleware/auth";
 import { ApiError } from "../lib/errors";
+import { parseCsvRecords } from "../lib/csv";
 
 const router = Router();
 router.use(requireAuth);
@@ -103,6 +104,117 @@ router.post(
       data: { ...body, organizationId },
     });
     res.status(201).json(product);
+  })
+);
+
+interface ImportRowError {
+  row: number;
+  message: string;
+}
+
+function parseNonNegativeInt(value: string, field: string, rowNumber: number, errors: ImportRowError[]): number | undefined {
+  if (!value) return undefined;
+  const asDollars = Number(value);
+  if (Number.isNaN(asDollars) || asDollars < 0) {
+    errors.push({ row: rowNumber, message: `${field} must be a non-negative number` });
+    return undefined;
+  }
+  return field === "cost" || field === "price" ? Math.round(asDollars * 100) : Math.round(asDollars);
+}
+
+// F10: CSV import of products. Runs through the Node API (not the Python
+// service) because it writes — the Python service is read-only by design
+// (PRD §8), so any operation that mutates tenant data has to go through
+// the API that owns the tenant boundary. Rows are processed independently:
+// a bad row is recorded in `errors` and skipped rather than aborting the
+// whole import, since a shop's spreadsheet export is rarely perfectly clean.
+router.post(
+  "/import",
+  express.text({ type: ["text/csv", "text/plain"], limit: "2mb" }),
+  asyncHandler(async (req, res) => {
+    const organizationId = req.auth!.organizationId;
+    const csvText = typeof req.body === "string" ? req.body : "";
+    if (!csvText.trim()) {
+      throw ApiError.badRequest("Request body must be CSV text (Content-Type: text/csv)");
+    }
+
+    const records = parseCsvRecords(csvText);
+    const errors: ImportRowError[] = [];
+    const categoryCache = new Map<string, string>();
+    let created = 0;
+    let updated = 0;
+
+    for (let index = 0; index < records.length; index += 1) {
+      const rowNumber = index + 2; // +1 for the header row, +1 for 1-based counting
+      const record = records[index];
+      const sku = record.sku?.trim();
+      const name = record.name?.trim();
+
+      if (!sku || sku.length > 64) {
+        errors.push({ row: rowNumber, message: "sku is required (max 64 chars)" });
+        continue;
+      }
+      if (!name || name.length > 200) {
+        errors.push({ row: rowNumber, message: "name is required (max 200 chars)" });
+        continue;
+      }
+
+      const rowErrorsBefore = errors.length;
+      const costCents = parseNonNegativeInt(record.cost, "cost", rowNumber, errors);
+      const priceCents = parseNonNegativeInt(record.price, "price", rowNumber, errors);
+      const reorderPoint = parseNonNegativeInt(record.reorderPoint, "reorderPoint", rowNumber, errors);
+      const reorderQty = parseNonNegativeInt(record.reorderQty, "reorderQty", rowNumber, errors);
+      if (errors.length > rowErrorsBefore) continue;
+
+      let categoryId: string | undefined;
+      const categoryName = record.category?.trim();
+      if (categoryName) {
+        const cached = categoryCache.get(categoryName);
+        if (cached) {
+          categoryId = cached;
+        } else {
+          const category =
+            (await prisma.category.findFirst({ where: { organizationId, name: categoryName } })) ??
+            (await prisma.category.create({ data: { organizationId, name: categoryName } }));
+          categoryId = category.id;
+          categoryCache.set(categoryName, categoryId);
+        }
+      }
+
+      const existing = await prisma.product.findFirst({ where: { organizationId, sku } });
+      if (existing) {
+        await prisma.product.update({
+          where: { id: existing.id },
+          data: {
+            name,
+            ...(record.description ? { description: record.description } : {}),
+            ...(categoryId ? { categoryId } : {}),
+            ...(costCents !== undefined ? { costCents } : {}),
+            ...(priceCents !== undefined ? { priceCents } : {}),
+            ...(reorderPoint !== undefined ? { reorderPoint } : {}),
+            ...(reorderQty !== undefined ? { reorderQty } : {}),
+          },
+        });
+        updated += 1;
+      } else {
+        await prisma.product.create({
+          data: {
+            organizationId,
+            sku,
+            name,
+            description: record.description || undefined,
+            categoryId,
+            costCents: costCents ?? 0,
+            priceCents: priceCents ?? 0,
+            reorderPoint: reorderPoint ?? 0,
+            reorderQty: reorderQty ?? 0,
+          },
+        });
+        created += 1;
+      }
+    }
+
+    res.json({ created, updated, errors });
   })
 );
 

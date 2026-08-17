@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from datetime import datetime, timedelta, timezone
 from io import StringIO
 
@@ -11,6 +12,7 @@ from sqlalchemy.engine import Connection
 from app.config import settings
 from app.db import get_db
 from app.services.export import fetch_movement_rows, fetch_products_rows, fetch_stock_rows
+from app.services.reorder import fetch_reorder_candidates
 from app.services.reports import fetch_sales_stock_trend
 
 router = APIRouter()
@@ -78,3 +80,50 @@ def sales_stock_trend(
         "revenueCents": sum(item["revenueCents"] for item in series),
     }
     return {"days": days, "series": series, "totals": totals}
+
+
+# F12: reorder-quantity suggestion (moving-average demand). Only products
+# already at/under their reorder point are considered (same "low stock"
+# definition F8 uses on the Node dashboard) — avgDailyDemand comes from
+# trailing units sold over `days`, and suggestedQty targets enough stock to
+# cover `coverageDays` of that demand, floored at the product's own
+# reorderQty so the suggestion never undercuts what the owner already
+# configured as their standard reorder amount.
+@router.get("/reports/reorder-suggestions", dependencies=[Depends(require_internal_caller)])
+def reorder_suggestions(
+    organization_id: str = Query(...),
+    days: int = Query(default=30, ge=1, le=365),
+    coverage_days: int = Query(default=14, ge=1, le=90),
+    conn: Connection = Depends(get_db),
+) -> dict:
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = fetch_reorder_candidates(conn, organization_id, since)
+
+    items = []
+    for row in rows:
+        current_stock = int(row["current_stock"])
+        units_sold = int(row["units_sold"])
+        avg_daily_demand = units_sold / days
+        days_of_stock_remaining = current_stock / avg_daily_demand if avg_daily_demand > 0 else None
+        target_stock = math.ceil(avg_daily_demand * coverage_days)
+        suggested_qty = max(int(row["reorder_qty"]), target_stock - current_stock, 0)
+        items.append(
+            {
+                "productId": row["product_id"],
+                "sku": row["sku"],
+                "name": row["name"],
+                "currentStock": current_stock,
+                "reorderPoint": int(row["reorder_point"]),
+                "reorderQty": int(row["reorder_qty"]),
+                "avgDailyDemand": round(avg_daily_demand, 2),
+                "daysOfStockRemaining": round(days_of_stock_remaining, 1)
+                if days_of_stock_remaining is not None
+                else None,
+                "suggestedQty": suggested_qty,
+            }
+        )
+
+    items.sort(
+        key=lambda item: item["daysOfStockRemaining"] if item["daysOfStockRemaining"] is not None else float("inf")
+    )
+    return {"days": days, "coverageDays": coverage_days, "items": items}

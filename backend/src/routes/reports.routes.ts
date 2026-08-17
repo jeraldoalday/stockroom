@@ -59,4 +59,24 @@ router.get(
   })
 );
 
+const reorderSuggestionsQuerySchema = z.object({
+  days: z.coerce.number().int().min(1).max(365).optional(),
+  coverageDays: z.coerce.number().int().min(1).max(90).optional(),
+});
+
+// F12: reorder-quantity suggestion (moving-average demand). JSON, same
+// proxy pattern as /trend above.
+router.get(
+  "/reorder-suggestions",
+  asyncHandler(async (req, res) => {
+    const query = reorderSuggestionsQuerySchema.parse(req.query);
+    const result = await callPythonService("/reports/reorder-suggestions", {
+      organization_id: req.auth!.organizationId,
+      ...(query.days ? { days: String(query.days) } : {}),
+      ...(query.coverageDays ? { coverage_days: String(query.coverageDays) } : {}),
+    });
+    res.type("application/json").send(result.body);
+  })
+);
+
 export default router;

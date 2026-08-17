@@ -113,3 +113,66 @@ def test_trend_rejects_invalid_days(monkeypatch):
     )
     res = client.get("/reports/trend", params={"organization_id": "org_1", "days": 0}, headers=HEADERS)
     assert res.status_code == 422
+
+
+def test_reorder_suggestions_computes_moving_average_and_target(monkeypatch):
+    monkeypatch.setattr(
+        "app.routers.reports.fetch_reorder_candidates",
+        lambda conn, organization_id, since: [
+            # 30 units sold over a 30-day window -> 1/day; 14-day coverage
+            # target is 14, current stock is 3, so target - current = 11,
+            # which beats the product's own reorderQty of 5.
+            {
+                "product_id": "prod_1",
+                "sku": "WIDGET-1",
+                "name": "Widget",
+                "reorder_point": 5,
+                "reorder_qty": 5,
+                "current_stock": 3,
+                "units_sold": 30,
+            },
+            # No sales in the window -> avgDailyDemand 0, no days-of-stock
+            # figure, suggestion falls back to the product's own reorderQty.
+            {
+                "product_id": "prod_2",
+                "sku": "GADGET-1",
+                "name": "Gadget",
+                "reorder_point": 10,
+                "reorder_qty": 20,
+                "current_stock": 2,
+                "units_sold": 0,
+            },
+        ],
+    )
+    res = client.get(
+        "/reports/reorder-suggestions",
+        params={"organization_id": "org_1", "days": 30, "coverage_days": 14},
+        headers=HEADERS,
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["days"] == 30
+    assert body["coverageDays"] == 14
+    assert len(body["items"]) == 2
+
+    widget = next(item for item in body["items"] if item["sku"] == "WIDGET-1")
+    assert widget["avgDailyDemand"] == 1.0
+    assert widget["daysOfStockRemaining"] == 3.0
+    assert widget["suggestedQty"] == 11
+
+    gadget = next(item for item in body["items"] if item["sku"] == "GADGET-1")
+    assert gadget["avgDailyDemand"] == 0.0
+    assert gadget["daysOfStockRemaining"] is None
+    assert gadget["suggestedQty"] == 20
+
+    # Most urgent (fewest days of stock remaining) sorts first.
+    assert [item["sku"] for item in body["items"]] == ["WIDGET-1", "GADGET-1"]
+
+
+def test_reorder_suggestions_requires_internal_key(monkeypatch):
+    monkeypatch.setattr(
+        "app.routers.reports.fetch_reorder_candidates",
+        lambda conn, organization_id, since: [],
+    )
+    res = client.get("/reports/reorder-suggestions", params={"organization_id": "org_1"})
+    assert res.status_code == 401

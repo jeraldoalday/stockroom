@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
-import { downloadExport, fetchTrend } from "../api/reports";
+import { downloadExport, fetchReorderSuggestions, fetchTrend } from "../api/reports";
 import type { ExportKind } from "../api/reports";
 import { isApiError } from "../api/errors";
 
@@ -21,6 +21,7 @@ export function ReportsPage() {
   const [exportError, setExportError] = useState<string | null>(null);
 
   const trendQuery = useQuery({ queryKey: ["reports", "trend", days], queryFn: () => fetchTrend(days) });
+  const reorderQuery = useQuery({ queryKey: ["reports", "reorder-suggestions"], queryFn: fetchReorderSuggestions });
 
   const maxUnits = Math.max(1, ...(trendQuery.data?.series.map((p) => Math.max(p.unitsSold, p.unitsReceived)) ?? [1]));
 
@@ -100,6 +101,49 @@ export function ReportsPage() {
                 <span className="w-20 shrink-0 text-right text-gray-500">{formatCents(point.revenueCents)}</span>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-6 rounded-lg border border-gray-200 bg-white p-4">
+        <h2 className="text-lg font-semibold text-gray-900">Reorder suggestions</h2>
+        <p className="mt-1 text-sm text-gray-500">
+          Products at or below their reorder point, ranked by how soon they'll run out based on the last{" "}
+          {reorderQuery.data?.days ?? 30}-day average daily demand.
+        </p>
+        {reorderQuery.isLoading && <p className="mt-3 text-sm text-gray-500">Loading...</p>}
+        {reorderQuery.isError && <p className="mt-3 text-sm text-red-600">Failed to load reorder suggestions.</p>}
+        {reorderQuery.data?.items.length === 0 && (
+          <p className="mt-3 text-sm text-gray-500">No products are at or below their reorder point.</p>
+        )}
+        {reorderQuery.data && reorderQuery.data.items.length > 0 && (
+          <div className="mt-3 overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-500">
+                  <th className="py-1.5 pr-4">Product</th>
+                  <th className="py-1.5 pr-4">On hand</th>
+                  <th className="py-1.5 pr-4">Avg daily demand</th>
+                  <th className="py-1.5 pr-4">Days of stock left</th>
+                  <th className="py-1.5 pr-4">Suggested reorder qty</th>
+                </tr>
+              </thead>
+              <tbody>
+                {reorderQuery.data.items.map((item) => (
+                  <tr key={item.productId} className="border-t border-gray-100">
+                    <td className="py-1.5 pr-4 text-gray-900">
+                      {item.name} <span className="text-gray-400">({item.sku})</span>
+                    </td>
+                    <td className="py-1.5 pr-4 text-gray-700">{item.currentStock}</td>
+                    <td className="py-1.5 pr-4 text-gray-700">{item.avgDailyDemand}</td>
+                    <td className="py-1.5 pr-4 text-gray-700">
+                      {item.daysOfStockRemaining ?? "—"}
+                    </td>
+                    <td className="py-1.5 pr-4 font-medium text-gray-900">{item.suggestedQty}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

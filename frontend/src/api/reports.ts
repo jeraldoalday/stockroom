@@ -24,6 +24,29 @@ export async function fetchTrend(days: 7 | 30): Promise<TrendResponse> {
   return res.data;
 }
 
+export interface ReorderSuggestion {
+  productId: string;
+  sku: string;
+  name: string;
+  currentStock: number;
+  reorderPoint: number;
+  reorderQty: number;
+  avgDailyDemand: number;
+  daysOfStockRemaining: number | null;
+  suggestedQty: number;
+}
+
+export interface ReorderSuggestionsResponse {
+  days: number;
+  coverageDays: number;
+  items: ReorderSuggestion[];
+}
+
+export async function fetchReorderSuggestions(): Promise<ReorderSuggestionsResponse> {
+  const res = await apiClient.get<ReorderSuggestionsResponse>("/reports/reorder-suggestions");
+  return res.data;
+}
+
 export type ExportKind = "products" | "stock" | "movements";
 
 // Downloads share the same axios instance (and its auth interceptor) as

@@ -99,4 +99,35 @@ describe("GET /api/reports/*", () => {
 
     expect(res.status).toBe(400);
   });
+
+  it("proxies reorder suggestions, passing days and coverageDays through", async () => {
+    const token = await signUpAndGetToken("owner6@shop.test", "Shop 6");
+    const fetchSpy = mockPythonServiceResponse(JSON.stringify({ days: 30, coverageDays: 7, items: [] }), {
+      headers: { "content-type": "application/json" },
+    });
+
+    const res = await request(app)
+      .get("/api/reports/reorder-suggestions")
+      .query({ days: 30, coverageDays: 7 })
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.coverageDays).toBe(7);
+    const calledUrl = new URL(String(fetchSpy.mock.calls[0][0]));
+    expect(calledUrl.pathname).toBe("/reports/reorder-suggestions");
+    expect(calledUrl.searchParams.get("days")).toBe("30");
+    expect(calledUrl.searchParams.get("coverage_days")).toBe("7");
+  });
+
+  it("rejects an out-of-range coverageDays value", async () => {
+    const token = await signUpAndGetToken("owner7@shop.test", "Shop 7");
+    mockPythonServiceResponse("");
+
+    const res = await request(app)
+      .get("/api/reports/reorder-suggestions")
+      .query({ coverageDays: 0 })
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(400);
+  });
 });

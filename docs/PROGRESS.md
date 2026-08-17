@@ -295,3 +295,91 @@ dialogs) are still open and reasonable to pick up alongside Day 13.
   the sandbox's installed Postgres 16, and services/`.env` files are torn
   down again at the end of each session (they're gitignored — verified
   `.env` was never accidentally committed).
+
+## Day 12 — 2026-08-17
+
+**Planned:** F12, the last unimplemented PRD requirement — a simple
+reorder-quantity suggestion from moving-average demand (Python service).
+
+**Shipped:**
+- `python-service/app/services/reorder.py`: `fetch_reorder_candidates`, a
+  single SQL query that joins each active product against its summed
+  `inventory_items.quantity` and its trailing `SALE` units over a window,
+  filtered server-side to products already at/under their `reorderPoint`
+  (the same "low stock" definition F8 already uses on the Node dashboard).
+- New endpoint `GET /reports/reorder-suggestions` (python-service) and
+  proxy `GET /api/reports/reorder-suggestions` (Node), same
+  internal-key-gated proxy pattern as the existing `/trend` route. Query
+  params: `days` (trailing window for the moving average, default 30) and
+  `coverageDays` (target days of stock the suggestion aims to cover,
+  default 14). Response per product: `avgDailyDemand`, `daysOfStockRemaining`
+  (null when there's been no demand to divide by), and `suggestedQty` —
+  computed as `max(reorderQty, ceil(avgDailyDemand * coverageDays) -
+  currentStock, 0)`, so the suggestion is floored at whatever reorder
+  quantity the owner already configured rather than ever undercutting it.
+  Items sort by `daysOfStockRemaining` ascending (most urgent first, no
+  demand sorts last).
+- Frontend: `ReportsPage` gets a new "Reorder suggestions" table (product,
+  on-hand, avg daily demand, days of stock left, suggested reorder qty),
+  fetched via a new `fetchReorderSuggestions` in `api/reports.ts`. No new
+  query-string controls — days/coverageDays use their endpoint defaults for
+  this first cut, consistent with how the 7/30-day trend toggle is the only
+  other report control on this page.
+- Tests: 2 new python-service tests (moving-average math, sort order, the
+  "no sales in window" zero-demand case, and the internal-key gate) and 2
+  new backend proxy tests (query passthrough, an out-of-range `coverageDays`
+  rejection).
+
+**Found and fixed a real bug while browser-verifying this:** the initial
+SQL summed `stock_movements.quantity` directly for `SALE` rows to get
+units sold. `POST /stock-movements` actually persists `SALE` quantities as
+a *negative* signed delta (`delta = type === 'SALE' ? -quantity : quantity`,
+stored as-is — see `stockMovements.routes.ts`), which the existing F11
+trend query already accounts for with a `-sm."quantity"` negation. My new
+query didn't negate, so `avgDailyDemand` came back negative and every
+suggestion was silently wrong (`daysOfStockRemaining` came out null,
+`suggestedQty` came out 0) instead of erroring — the kind of bug that
+looks like an empty/quiet result rather than a crash, so `pytest` alone
+(which mocks the row-shaping, not the raw SQL) didn't catch it. Caught it
+by standing up real Postgres + all three services and driving the feature
+through a browser: create a product with `reorderPoint=10`, receive 20,
+sell 15, and check the number that renders (`avgDailyDemand` should be
+positive, `daysOfStockRemaining` should be `10`, not `null`). Fixed by
+negating the `SALE` sum the same way the trend query does, and left an
+explicit SQL comment cross-referencing both call sites so the sign
+convention doesn't get re-broken independently a third time.
+
+**Verified:** `tsc --noEmit` + full Jest suite (80/80) on the backend,
+`pytest` (9/9) on python-service, `tsc -b && vite build` on the frontend —
+all clean. Beyond that: real local Postgres (`pg_ctlcluster 16 main
+start`, same as every prior session), all three services running, and a
+Playwright script driving signup → create product (reorderPoint 10) →
+receive 20 → sell 15 → Reports page, confirming the Reorder suggestions
+table shows on-hand 5, avg daily demand 0.5, days of stock left 10,
+suggested qty 2 — and no console/network errors beyond the expected
+favicon 404. Also caught and fixed an unrelated local-setup gap while
+doing this: `frontend/.env` didn't exist yet in this session (only
+`.env.example`), so the frontend's `VITE_API_URL` was undefined and every
+API call silently hit the Vite dev server instead of the backend. Not a
+code bug — `.env` is gitignored by design — but worth noting for the next
+session's from-scratch verification.
+
+**Next:** All of PRD §6's functional requirements (F1-F12) are now
+implemented. What's left is Day 13-14 of the build plan: integration
+testing, RBAC hardening (the recurring cost/margin-for-STAFF gap flagged
+in every prior entry), seed data, docs, and final polish — plus the
+smaller open items already on record (stock-movement history pagination,
+delete confirmation dialogs for Locations/Suppliers/Customers).
+
+**Blockers/decisions carried forward:**
+- Same RBAC gap as every prior entry: cost/margin fields are still visible
+  to STAFF everywhere, including this session's new reorder-suggestions
+  endpoint (which does include `avgDailyDemand`/`suggestedQty`, not cost
+  data, but the endpoint doesn't role-check who's asking either way). This
+  is squarely Day 13 scope now that F1-F12 are done — no reason left to
+  defer it further.
+- `coverageDays` and the moving-average `days` window are exposed as query
+  params on the endpoint but not as UI controls yet (the frontend always
+  uses the defaults: 30-day window, 14-day coverage target). Low-risk to
+  add alongside the existing 7/30-day trend toggle whenever this page gets
+  its next polish pass.

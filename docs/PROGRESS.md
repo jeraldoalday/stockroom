@@ -383,3 +383,104 @@ delete confirmation dialogs for Locations/Suppliers/Customers).
   uses the defaults: 30-day window, 14-day coverage target). Low-risk to
   add alongside the existing 7/30-day trend toggle whenever this page gets
   its next polish pass.
+
+## Day 13 — 2026-08-18
+
+**Planned:** Day 13 of the build plan — RBAC hardening, the recurring gap
+flagged in every entry since Day 2-6 ("cost/margin fields are still visible
+to STAFF everywhere").
+
+**Found a bigger gap first:** before touching field-level RBAC, checked how
+a STAFF user actually gets created — there was no way. `POST /api/auth/signup`
+only ever creates an Owner, and no other endpoint could add a user to an
+existing org. Every prior session's STAFF-role code (route gates, persona
+docs) was effectively dead: an org could never have a second user, let alone
+a Staff one. Treated this as the real Day 13 scope, not a side quest, since
+field-level RBAC is meaningless if the role it protects against is
+unreachable.
+
+**Shipped — team management:**
+- `backend/src/routes/users.routes.ts`, mounted at `/api/users`, Owner-only:
+  list org members, invite a new user (Staff or Owner, by email/password),
+  `PATCH /:id` to change a member's role, `DELETE /:id` to remove one.
+  Guarded so an org can never drop to zero Owners (checked on both demote
+  and delete), a user can't remove their own account, and a user with
+  stock-movement history can't be deleted (same "block delete once there's
+  history" rule already used for Suppliers/Customers — hard-deleting them
+  would otherwise either corrupt the movement's `actor` reference or fail
+  the FK outright).
+- Frontend `TeamPage` (invite form + member table with promote/demote/remove
+  actions) at `/team`, gated out of the nav and the route itself for STAFF
+  via a new `ownerOnly` flag on `ProtectedRoute`.
+- 7 new backend tests covering invite, role changes, the last-Owner guard,
+  self-delete/self-demote blocks, the stock-movement-history block, and
+  STAFF getting 403'd off every route here.
+
+**Shipped — cost/margin data hidden from STAFF (PRD §4):**
+- Rather than scrub `costCents`/`unitCostCents`/`totalStockValueCents` in
+  each route individually (which is exactly how this stayed unfixed for 12
+  days — easy to add a new endpoint and forget), `requireAuth` now wraps
+  `res.json` for a STAFF principal and recursively strips those three keys
+  from every JSON response in one place (`lib/rbac.ts`). Covers products,
+  dashboard summary/low-stock, inventory, stock movements, and purchase
+  orders without touching each route's handler.
+- Writes are covered too: `stripCostForStaff` drops `costCents` from a
+  STAFF caller's product create/update body before it's persisted (silently
+  ignored rather than rejected — a STAFF user creating a product just gets
+  the schema's 0 default), and CSV import skips parsing the `cost` column
+  for STAFF the same way.
+- The products CSV export is the one response that isn't JSON, so it isn't
+  covered by the `res.json` wrapper — added an `include_cost` query param
+  the python-service endpoint honors (drops the `cost_cents` column from
+  the DataFrame), which the Node proxy sets from `req.auth.role`.
+- Frontend: hid the Cost input on the product create form, the "Total stock
+  value" dashboard stat card, and the PO detail panel's "Unit cost" column
+  for STAFF — the API already refuses to return this data to them, so
+  showing empty/broken cost UI would just be confusing.
+- 2 new backend test files (`rbac.test.ts` end-to-end through real routes,
+  `rbac.unit.test.ts` directly against the redaction function for the
+  nested-object cases the in-memory Prisma mock can't exercise, since it
+  doesn't resolve Prisma's `include` — same known limitation
+  `purchaseOrders.routes.ts` already works around) plus 1 new python-service
+  test for `include_cost=false`.
+
+**Verified:** `tsc --noEmit` + full Jest suite (95/95) on the backend,
+`pytest` (10/10) on python-service, `tsc -b && vite build` on the frontend —
+all clean. Beyond that: real local Postgres + all three services, driven
+through two Playwright scripts. First: sign up an Owner, create a product
+with cost, invite a Staff user via the new Team page, confirm the invite
+shows up in the member list, log in as Staff, and confirm the dashboard's
+stock-value card, the Team nav link, `/team` itself (redirects home), and
+the product form's Cost input are all absent — while price still renders
+correctly. Second: as Owner, create a purchase order with a $12.50 unit
+cost and confirm the detail panel shows it; invite Staff, log in as them,
+and confirm the same PO's detail panel has no "Unit cost" column at all,
+and that the Staff-triggered products CSV export contains no cost data
+while still containing the product's SKU/name. No console/network errors
+beyond the expected favicon 404.
+
+**Next:** Day 13's other listed items — integration testing, seed data,
+docs — plus Day 14 (polish, demo script, deployment docs). Remaining
+smaller open items from earlier entries are still open too: stock-movement
+history pagination, delete-confirmation dialogs for
+Locations/Suppliers/Customers.
+
+**Blockers/decisions carried forward:**
+- The invite flow issues a plain temporary password chosen by the Owner
+  (no emailed invite link/token) — there's no outbound email capability in
+  this stack yet (no SMTP/provider configured anywhere in the PRD or env
+  files), and a real invite-link flow needs one. This is a reasonable v1
+  cut: the Owner sets the password and tells the Staff member directly,
+  same trust model as them already knowing everyone's login for a small
+  shop. Revisit if/when transactional email is added for other reasons
+  (e.g. password reset, which also doesn't exist yet).
+- Deliberately did not add a "change your own password" or password-reset
+  flow in this session — team management's job here was making STAFF
+  reachable at all and closing the cost/margin gap; password lifecycle is
+  a separate, equally-sized piece of work better scoped on its own.
+- `redactCostFields` is a blunt global rule (strip these 3 key names from
+  any JSON body, anywhere) rather than a per-field permission system. That
+  trades precision for the property that a new endpoint can't silently
+  reintroduce this exact gap — worth revisiting only if a future field
+  needs role-based visibility with more nuance than "Owner-only," which
+  nothing in the current PRD calls for.

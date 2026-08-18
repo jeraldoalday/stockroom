@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 import type { UserRole } from "@prisma/client";
 import { verifyAccessToken } from "../lib/auth";
 import { ApiError } from "../lib/errors";
+import { redactCostFields } from "../lib/rbac";
 
 // Augment Express's Request with the authenticated principal. Every
 // tenant-scoped query in the app reads req.auth.organizationId — the
@@ -19,7 +20,7 @@ declare global {
   }
 }
 
-export function requireAuth(req: Request, _res: Response, next: NextFunction) {
+export function requireAuth(req: Request, res: Response, next: NextFunction) {
   const header = req.headers.authorization;
   if (!header?.startsWith("Bearer ")) {
     return next(ApiError.unauthorized("Missing bearer token"));
@@ -33,6 +34,14 @@ export function requireAuth(req: Request, _res: Response, next: NextFunction) {
       organizationId: payload.organizationId,
       role: payload.role,
     };
+
+    // Every JSON response sent for a STAFF principal has cost/margin fields
+    // stripped, regardless of which route produced it — see lib/rbac.ts.
+    if (payload.role === "STAFF") {
+      const originalJson = res.json.bind(res);
+      res.json = ((body: unknown) => originalJson(redactCostFields(body))) as Response["json"];
+    }
+
     next();
   } catch {
     next(ApiError.unauthorized("Invalid or expired token"));

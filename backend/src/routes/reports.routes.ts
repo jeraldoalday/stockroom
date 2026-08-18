@@ -20,7 +20,13 @@ function sendProxied(res: import("express").Response, result: Awaited<ReturnType
 router.get(
   "/export/products",
   asyncHandler(async (req, res) => {
-    const result = await callPythonService("/export/products", { organization_id: req.auth!.organizationId });
+    const result = await callPythonService("/export/products", {
+      organization_id: req.auth!.organizationId,
+      // Cost data is Owner-only (PRD §4); the Python service drops the
+      // column server-side rather than the Node proxy trying to edit CSV
+      // text after the fact.
+      include_cost: String(req.auth!.role === "OWNER"),
+    });
     sendProxied(res, result);
   })
 );

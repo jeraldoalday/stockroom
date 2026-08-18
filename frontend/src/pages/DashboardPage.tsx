@@ -40,10 +40,12 @@ export function DashboardPage() {
       )}
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard
-          label="Total stock value"
-          value={summaryQuery.data ? formatCents(summaryQuery.data.totalStockValueCents) : "—"}
-        />
+        {user?.role === "OWNER" && (
+          <StatCard
+            label="Total stock value"
+            value={summaryQuery.data ? formatCents(summaryQuery.data.totalStockValueCents ?? 0) : "—"}
+          />
+        )}
         <StatCard
           label="Active products"
           value={summaryQuery.data ? String(summaryQuery.data.activeProductCount) : "—"}

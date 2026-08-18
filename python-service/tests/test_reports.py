@@ -50,6 +50,33 @@ def test_export_products_returns_csv(monkeypatch):
     assert "Widget" in res.text
 
 
+def test_export_products_drops_cost_when_include_cost_is_false(monkeypatch):
+    monkeypatch.setattr(
+        "app.routers.reports.fetch_products_rows",
+        lambda conn, organization_id: [
+            {
+                "sku": "WIDGET-1",
+                "name": "Widget",
+                "category": "Gadgets",
+                "cost_cents": 500,
+                "price_cents": 999,
+                "reorder_point": 5,
+                "reorder_qty": 20,
+                "is_active": True,
+            }
+        ],
+    )
+    res = client.get(
+        "/export/products",
+        params={"organization_id": "org_1", "include_cost": "false"},
+        headers=HEADERS,
+    )
+    assert res.status_code == 200
+    assert "cost_cents" not in res.text
+    assert "500" not in res.text
+    assert "999" in res.text  # price_cents is unaffected
+
+
 def test_export_stock_returns_csv(monkeypatch):
     monkeypatch.setattr(
         "app.routers.reports.fetch_stock_rows",

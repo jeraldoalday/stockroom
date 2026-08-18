@@ -119,7 +119,7 @@ function PurchaseOrderRow({
                     <th className="py-1 text-left">Product</th>
                     <th className="py-1 text-right">Ordered</th>
                     <th className="py-1 text-right">Received</th>
-                    <th className="py-1 text-right">Unit cost</th>
+                    {isOwner && <th className="py-1 text-right">Unit cost</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -128,7 +128,7 @@ function PurchaseOrderRow({
                       <td className="py-1">{productName(line.productId)}</td>
                       <td className="py-1 text-right">{line.quantityOrdered}</td>
                       <td className="py-1 text-right">{line.quantityReceived}</td>
-                      <td className="py-1 text-right">{formatCents(line.unitCostCents)}</td>
+                      {isOwner && <td className="py-1 text-right">{formatCents(line.unitCostCents ?? 0)}</td>}
                     </tr>
                   ))}
                 </tbody>

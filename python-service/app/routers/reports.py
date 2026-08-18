@@ -35,8 +35,17 @@ def _csv_response(rows: list[dict], filename: str) -> Response:
 
 
 @router.get("/export/products", dependencies=[Depends(require_internal_caller)])
-def export_products(organization_id: str = Query(...), conn: Connection = Depends(get_db)) -> Response:
+def export_products(
+    organization_id: str = Query(...),
+    include_cost: bool = Query(default=True),
+    conn: Connection = Depends(get_db),
+) -> Response:
     rows = fetch_products_rows(conn, organization_id)
+    # Cost data is Owner-only (PRD §4: staff has "no access to cost/margin
+    # data by default") — the Node proxy tells us who's asking via
+    # include_cost rather than this service trying to know about roles.
+    if not include_cost:
+        rows = [{k: v for k, v in row.items() if k != "cost_cents"} for row in rows]
     return _csv_response(rows, "products.csv")
 
 

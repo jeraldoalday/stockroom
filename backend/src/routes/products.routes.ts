@@ -85,10 +85,20 @@ async function assertCategoryBelongsToOrg(categoryId: string | null | undefined,
   }
 }
 
+// STAFF has "no access to cost/margin data by default" (PRD §4) — reads are
+// covered by the global redaction in requireAuth, but a write also has to
+// ignore any costCents a STAFF caller supplies rather than let them set a
+// field they can't see back.
+function stripCostForStaff<T extends { costCents?: number }>(body: T, role: string): T {
+  if (role !== "STAFF") return body;
+  const { costCents: _costCents, ...rest } = body;
+  return rest as T;
+}
+
 router.post(
   "/",
   asyncHandler(async (req, res) => {
-    const body = productSchema.parse(req.body);
+    const body = stripCostForStaff(productSchema.parse(req.body), req.auth!.role);
     const organizationId = req.auth!.organizationId;
 
     await assertCategoryBelongsToOrg(body.categoryId, organizationId);
@@ -133,6 +143,7 @@ router.post(
   express.text({ type: ["text/csv", "text/plain"], limit: "2mb" }),
   asyncHandler(async (req, res) => {
     const organizationId = req.auth!.organizationId;
+    const isStaff = req.auth!.role === "STAFF";
     const csvText = typeof req.body === "string" ? req.body : "";
     if (!csvText.trim()) {
       throw ApiError.badRequest("Request body must be CSV text (Content-Type: text/csv)");
@@ -160,7 +171,10 @@ router.post(
       }
 
       const rowErrorsBefore = errors.length;
-      const costCents = parseNonNegativeInt(record.cost, "cost", rowNumber, errors);
+      // A STAFF import silently keeps whatever cost the product already has
+      // (or 0 on create) instead of erroring on a cost column it can't set —
+      // same "no access to cost data" rule as the create/update routes.
+      const costCents = isStaff ? undefined : parseNonNegativeInt(record.cost, "cost", rowNumber, errors);
       const priceCents = parseNonNegativeInt(record.price, "price", rowNumber, errors);
       const reorderPoint = parseNonNegativeInt(record.reorderPoint, "reorderPoint", rowNumber, errors);
       const reorderQty = parseNonNegativeInt(record.reorderQty, "reorderQty", rowNumber, errors);
@@ -221,7 +235,7 @@ router.post(
 router.patch(
   "/:id",
   asyncHandler(async (req, res) => {
-    const body = productSchema.partial().parse(req.body);
+    const body = stripCostForStaff(productSchema.partial().parse(req.body), req.auth!.role);
     const organizationId = req.auth!.organizationId;
 
     const product = await prisma.product.findFirst({

@@ -30,7 +30,9 @@ export interface Product {
   name: string;
   description: string | null;
   categoryId: string | null;
-  costCents: number;
+  // Omitted entirely for a STAFF principal — cost/margin data is Owner-only
+  // (PRD §4), stripped server-side rather than sent and hidden client-side.
+  costCents?: number;
   priceCents: number;
   reorderPoint: number;
   reorderQty: number;
@@ -116,7 +118,8 @@ export interface StockMovementListResponse {
 }
 
 export interface DashboardSummary {
-  totalStockValueCents: number;
+  // Omitted for STAFF — see Product.costCents.
+  totalStockValueCents?: number;
   activeProductCount: number;
   lowStockCount: number;
   recentMovements: StockMovement[];
@@ -141,7 +144,8 @@ export interface PurchaseOrderLine {
   productId: string;
   quantityOrdered: number;
   quantityReceived: number;
-  unitCostCents: number;
+  // Omitted for STAFF — see Product.costCents.
+  unitCostCents?: number;
   product?: Product;
 }
 
@@ -188,4 +192,16 @@ export interface SalesOrderListResponse {
   total: number;
   page: number;
   pageSize: number;
+}
+
+export interface TeamMember {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  createdAt: string;
+}
+
+export interface TeamMemberListResponse {
+  items: TeamMember[];
 }

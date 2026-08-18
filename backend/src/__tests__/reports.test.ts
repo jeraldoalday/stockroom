@@ -49,8 +49,31 @@ describe("GET /api/reports/*", () => {
     const calledUrl = new URL(String(fetchSpy.mock.calls[0][0]));
     expect(calledUrl.pathname).toBe("/export/products");
     expect(calledUrl.searchParams.get("organization_id")).toBeTruthy();
+    expect(calledUrl.searchParams.get("include_cost")).toBe("true");
     const calledInit = fetchSpy.mock.calls[0][1] as RequestInit;
     expect((calledInit.headers as Record<string, string>)["x-internal-key"]).toBeTruthy();
+  });
+
+  it("tells the python service to drop cost data when a STAFF user exports products", async () => {
+    const ownerToken = await signUpAndGetToken("owner8@shop.test", "Shop 8");
+    const invite = await request(app)
+      .post("/api/users")
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ name: "Clerk", email: "clerk8@shop.test", password: "hunter22222", role: "STAFF" });
+    const staffLogin = await request(app)
+      .post("/api/auth/login")
+      .send({ email: "clerk8@shop.test", password: "hunter22222" });
+    expect(invite.status).toBe(201);
+
+    const fetchSpy = mockPythonServiceResponse("sku,name\nSKU-1,Widget\n");
+
+    const res = await request(app)
+      .get("/api/reports/export/products")
+      .set("Authorization", `Bearer ${staffLogin.body.accessToken}`);
+
+    expect(res.status).toBe(200);
+    const calledUrl = new URL(String(fetchSpy.mock.calls[0][0]));
+    expect(calledUrl.searchParams.get("include_cost")).toBe("false");
   });
 
   it("passes the days query through to the movements export", async () => {

@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
+import { useAuth } from "../context/AuthContext";
 import { createProduct, fetchProducts, importProductsCsv } from "../api/products";
 import type { ImportProductsResult } from "../api/products";
 import { isApiError } from "../api/errors";
@@ -12,6 +13,8 @@ function formatCents(cents: number): string {
 
 export function ProductsPage() {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const isOwner = user?.role === "OWNER";
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -130,10 +133,12 @@ export function ProductsPage() {
             <label className="block text-sm font-medium text-gray-700">Price ($)</label>
             <input name="price" type="number" step="0.01" min="0" className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Cost ($)</label>
-            <input name="cost" type="number" step="0.01" min="0" className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
-          </div>
+          {isOwner && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Cost ($)</label>
+              <input name="cost" type="number" step="0.01" min="0" className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium text-gray-700">Reorder point</label>
             <input name="reorderPoint" type="number" min="0" className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />

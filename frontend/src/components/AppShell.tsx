@@ -15,15 +15,18 @@ const navItems = [
   { to: "/customers", label: "Customers" },
 ];
 
+const ownerOnlyNavItems = [{ to: "/team", label: "Team" }];
+
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
+  const items = user?.role === "OWNER" ? [...navItems, ...ownerOnlyNavItems] : navItems;
 
   return (
     <div className="min-h-screen flex">
       <aside className="w-56 bg-white border-r border-gray-200 flex flex-col">
         <div className="px-4 py-5 text-lg font-semibold text-brand-700">StockRoom</div>
         <nav className="flex-1 px-2 space-y-1">
-          {navItems.map((item) => (
+          {items.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}

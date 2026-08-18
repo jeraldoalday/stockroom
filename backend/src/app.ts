@@ -14,6 +14,7 @@ import purchaseOrdersRoutes from "./routes/purchaseOrders.routes";
 import salesOrdersRoutes from "./routes/salesOrders.routes";
 import dashboardRoutes from "./routes/dashboard.routes";
 import reportsRoutes from "./routes/reports.routes";
+import usersRoutes from "./routes/users.routes";
 
 export function createApp() {
   const app = express();
@@ -35,6 +36,7 @@ export function createApp() {
   app.use("/api/sales-orders", salesOrdersRoutes);
   app.use("/api/dashboard", dashboardRoutes);
   app.use("/api/reports", reportsRoutes);
+  app.use("/api/users", usersRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

@@ -484,3 +484,104 @@ Locations/Suppliers/Customers.
   reintroduce this exact gap — worth revisiting only if a future field
   needs role-based visibility with more nuance than "Owner-only," which
   nothing in the current PRD calls for.
+
+## Day 14 — 2026-08-19
+
+**Planned:** Day 14 of the build plan — polish, demo script, deployment
+docs, PRD v1 sign-off — plus the smaller open items carried forward from
+every prior entry (seed data, stock-movement history pagination,
+delete-confirmation dialogs for Locations/Suppliers/Customers).
+
+**Shipped:**
+- `backend/prisma/seed.ts` (`npx prisma db seed` / `npm run prisma:seed`):
+  a demo org ("Riverside Goods Co.") with two locations, three categories,
+  three products (one seeded under its reorder point on purpose, so the
+  low-stock/reorder-suggestion features have something to show
+  immediately), a supplier, a customer, a mix of RECEIVE/TRANSFER_OUT/
+  TRANSFER_IN/SALE stock movements, a fulfilled sales order, and a draft
+  purchase order. Every quantity change goes through the same
+  `InventoryItem` + `StockMovement` pairing the app itself uses, not a
+  shortcut direct write. Two logins printed on completion (Owner and
+  Staff), so the RBAC hardening from Day 13 has something to demo too.
+- Delete-confirmation dialogs (`window.confirm`) on Locations, Suppliers,
+  and Customers — closes the gap explicitly flagged as "cheap polish that
+  can land anytime" back in the Day 7 entry. Kept to `window.confirm`
+  rather than a custom modal component, consistent with how minimal these
+  three CRUD screens already are elsewhere.
+- Stock-movement history pagination: `StockMovementsPage` now has
+  Previous/Next controls and a "Page X of Y (N total)" indicator, wired to
+  the backend's existing `page`/`pageSize` query params (the backend has
+  supported this since Day 2-6; only the UI was missing). Recording a new
+  movement or transfer now resets to page 1 so the just-created row is
+  immediately visible.
+- `docs/DEPLOYMENT.md`: step-by-step deploy guide for all three services
+  plus Postgres. **Resolved the PRD §12 open question on hosting target:
+  Railway**, chosen over Render/Fly.io for straightforward private
+  networking between three services and one-command Postgres
+  provisioning — documented as a config choice, not an architectural
+  commitment, since nothing in the deploy steps is Railway-specific beyond
+  the exact console actions. Also documents (and flags as not yet actually
+  provisioned anywhere, including local dev) the read-only Postgres role
+  PRD §8 specifies for the Python service — every session so far, this one
+  included, has run Python against the same read/write role the backend
+  uses, which works but doesn't match the documented architecture; a real
+  deploy needs to actually create that role before go-live.
+- `docs/DEMO.md`: a ~10-minute walkthrough script covering every P0-P2
+  functional requirement (F1-F12) and the Day 13 RBAC hardening, built
+  around the new seed data so there's no live data entry needed mid-demo.
+- `docs/PRD.md`: status bumped from "Draft v0.1" to "v1 (signed off)",
+  the hosting open question marked resolved, and a new §13 summarizing
+  what shipped and what's explicitly deferred (email invites, the
+  not-yet-provisioned read-only DB role, per-location reorder
+  points/STAFF scoping).
+- README updated to link the two new docs and mention the optional seed
+  step in local setup.
+
+**Verified:** `tsc --noEmit` + full Jest suite (95/95) on the backend,
+`pytest` (10/10) on python-service, `tsc -b && vite build` on the
+frontend — all clean. Beyond that: real local Postgres (created the
+`stockroom` role/database from scratch this session — this sandbox had
+neither yet, unlike some prior sessions where they'd been left from a
+previous run), ran the new seed script and spot-checked the resulting
+`inventory_items` rows directly in `psql` against the expected math for
+sparkling water: received 120 and transferred 30 out at the warehouse
+(120 - 30 = 90, matches), transferred 30 in and sold 12 at the storefront
+(30 - 12 = 18, matches). Then stood up all three services and drove two Playwright
+scripts: (1) delete-confirmation on Suppliers — cancel leaves the row,
+confirm-and-accept on a fresh throwaway Location actually deletes it,
+and confirm-and-accept on a supplier *with* order history correctly still
+gets blocked by the backend's existing guard (surfaced as the UI's
+existing `rowError`, not a new bug); (2) stock-movement pagination —
+posted 25 extra movements via the authenticated API to push the seeded
+org past one page, confirmed "Page 1 of 2 (34 total)", clicked Next/
+Previous and confirmed the page number and Next/Previous disabled-state
+both update correctly. No console/page errors in either run beyond the
+usual favicon 404.
+
+**Next:** The 14-day plan is now fully complete. Continuing to extend the
+product past the MVP, the most valuable next slices look like: (1)
+actually provisioning the read-only Postgres role this session's
+`docs/DEPLOYMENT.md` documents, since it's the one deploy-doc claim that
+isn't yet true anywhere including local dev; (2) a password-reset /
+change-your-own-password flow (flagged as missing since Day 13); (3)
+per-location reorder points, since F12's suggestion math already sums
+demand correctly but can't target a specific location's stock; (4)
+product edit forms (Products currently has create + CSV import but no
+in-place edit, unlike every other CRUD screen).
+
+**Blockers/decisions carried forward:**
+- The read-only DB role gap above is now documented but still not fixed
+  anywhere — every session's local Postgres setup (including this one)
+  has used one shared read/write role for both the backend and the Python
+  service. Not a correctness bug (the Python service only ever issues
+  SELECTs in its own code), but it means the NFR in PRD §8 isn't actually
+  enforced at the database-grant level yet, only by convention. Tracked as
+  the top item for the next session rather than fixed here, since doing it
+  properly means updating local dev setup instructions too, not just the
+  deploy doc, and this session's scope was already Day 14's own list.
+- Chose `window.confirm` over a custom confirmation modal for the delete
+  dialogs. A custom modal would look more polished but there's no existing
+  modal component in the codebase to reuse, and introducing one for three
+  delete buttons felt like more abstraction than three call sites justify
+  — revisit if a fourth or fifth confirm-before-destructive-action need
+  shows up and the pattern starts repeating.

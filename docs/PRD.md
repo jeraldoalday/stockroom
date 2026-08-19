@@ -1,6 +1,6 @@
 # StockRoom — Product Requirements Document
 
-**Status:** Draft v0.1 · **Owner:** Jeraldo Alday · **Last updated:** 2026-08-14
+**Status:** v1 (signed off) · **Owner:** Jeraldo Alday · **Last updated:** 2026-08-19
 
 ## 1. Problem
 
@@ -152,6 +152,32 @@ session updates `docs/PROGRESS.md` with what shipped and what's next.
 ## 12. Open questions
 
 - Payment processing / billing provider (Stripe likely) — deferred to v2.
-- Hosting target (Railway/Render/Fly.io for MVP demo) — decide by day 12.
+- ~~Hosting target (Railway/Render/Fly.io for MVP demo) — decide by day
+  12.~~ **Resolved (Day 14):** Railway, documented in `docs/DEPLOYMENT.md`.
+  Decided later than the original "by day 12" target since deployment
+  wasn't the critical path while F1-F12 were still landing; nothing in the
+  build depended on this choice until the demo/deploy step itself.
 - Whether STAFF role needs per-location scoping — revisit after first
-  design partner feedback.
+  design partner feedback. Still open; not needed for any MVP requirement.
+
+## 13. v1 sign-off (Day 14)
+
+All P0/P1 functional requirements (F1-F11) and the P2 stretch requirement
+(F12) are implemented and covered by automated tests (95 backend, 10
+python-service) plus manual browser verification every build session. RBAC
+(F2's OWNER/STAFF split, including field-level cost/margin redaction per
+§4) is enforced end-to-end, not just on paper. See `docs/PROGRESS.md` for
+the full day-by-day build log and every architectural decision made along
+the way, and `docs/DEMO.md` for a walkthrough exercising every requirement
+against seeded data.
+
+Known gaps carried into v1, none blocking for a design-partner pilot:
+- No transactional email (invite links, password reset) — the Team page's
+  invite flow uses an Owner-set temporary password instead (§4, Day 13
+  decision).
+- The Python service's DB role is documented as read-only
+  (`docs/DEPLOYMENT.md`) but local dev has always used one shared
+  read/write role — a production deploy must actually create the
+  restricted role before going live.
+- Per-location reorder points, per-location STAFF scoping: both explicitly
+  deferred (§12).

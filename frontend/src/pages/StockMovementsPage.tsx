@@ -21,12 +21,18 @@ export function StockMovementsPage() {
   const [mode, setMode] = useState<"movement" | "transfer" | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [movementType, setMovementType] = useState<"RECEIVE" | "SALE" | "ADJUSTMENT">("RECEIVE");
+  const [page, setPage] = useState(1);
 
   const productsQuery = useQuery({ queryKey: ["products", "all"], queryFn: () => fetchProducts({ pageSize: 100 }) });
   const locationsQuery = useQuery({ queryKey: ["locations"], queryFn: fetchLocations });
-  const movementsQuery = useQuery({ queryKey: ["stock-movements"], queryFn: () => fetchStockMovements() });
+  const movementsQuery = useQuery({
+    queryKey: ["stock-movements", page],
+    queryFn: () => fetchStockMovements({ page }),
+  });
+  const totalPages = movementsQuery.data ? Math.max(1, Math.ceil(movementsQuery.data.total / movementsQuery.data.pageSize)) : 1;
 
   function invalidateAfterMovement() {
+    setPage(1);
     queryClient.invalidateQueries({ queryKey: ["stock-movements"] });
     queryClient.invalidateQueries({ queryKey: ["inventory"] });
     queryClient.invalidateQueries({ queryKey: ["dashboard"] });
@@ -280,6 +286,32 @@ export function StockMovementsPage() {
           </tbody>
         </table>
       </div>
+
+      {movementsQuery.data && movementsQuery.data.total > 0 && (
+        <div className="mt-4 flex items-center justify-between text-sm text-gray-600">
+          <span>
+            Page {movementsQuery.data.page} of {totalPages} ({movementsQuery.data.total} total)
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </AppShell>
   );
 }

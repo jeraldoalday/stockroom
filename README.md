@@ -3,8 +3,10 @@
 Inventory management SaaS for small businesses — multi-location stock
 tracking, purchase & sales orders, low-stock alerts, and reporting.
 
-See [`docs/PRD.md`](docs/PRD.md) for the product spec and
-[`docs/PROGRESS.md`](docs/PROGRESS.md) for the daily build log.
+See [`docs/PRD.md`](docs/PRD.md) for the product spec,
+[`docs/PROGRESS.md`](docs/PROGRESS.md) for the daily build log,
+[`docs/DEMO.md`](docs/DEMO.md) for a guided walkthrough using seed data, and
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for deploying beyond local dev.
 
 ## Stack
 
@@ -25,6 +27,7 @@ cd backend
 cp .env.example .env
 npm install
 npx prisma migrate dev
+npx prisma db seed     # optional: loads a demo org, see docs/DEMO.md
 npm run dev            # http://localhost:4000
 
 # 3. Frontend

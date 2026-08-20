@@ -585,3 +585,100 @@ in-place edit, unlike every other CRUD screen).
   delete buttons felt like more abstraction than three call sites justify
   — revisit if a fourth or fifth confirm-before-destructive-action need
   shows up and the pattern starts repeating.
+
+## Day 15 (post-MVP) — 2026-08-20
+
+**Planned:** The 14-day plan is fully shipped (F1-F12, §13 sign-off), so
+this session picked from Day 14's "most valuable next slices" list. Took
+two of them: (2) self-service password change and (4) in-place product
+editing — both small, self-contained, and closing gaps flagged in earlier
+entries. Deliberately did **not** take the read-only DB role (item 1) this
+session — see the note under blockers.
+
+**Shipped — self-service password change:**
+- `PATCH /api/auth/password` (auth.routes.ts), authenticated, requires the
+  caller's current password and a valid new one (same 8-72 char Zod rule as
+  signup). Verifies the current password with bcrypt before writing the new
+  hash. Deliberately gated on knowing the current password rather than being
+  an Owner override on `/api/users/:id`, so an Owner can't silently reset a
+  Staff member's login out from under them — the Day 13 invite flow already
+  lets an Owner *set* the initial password, which is a different trust point
+  (the Staff member is expected to change it after first login, which until
+  now they had no way to do).
+- Still no reset-by-email / forgot-password flow: no email provider is
+  configured anywhere in the stack (same blocker noted since Day 13's invite
+  flow). This covers "change a password you know," not "recover one you
+  forgot." A token-based reset needs transactional email first.
+- Frontend: new `/account` page (`AccountPage.tsx`), linked from the sidebar
+  footer, showing the signed-in user's name/email/role plus the
+  change-password form (current + new + confirm, with a client-side
+  match check before the request). Wired as a normal protected route (not
+  Owner-gated — every user manages their own password).
+- 4 new backend tests: unauthenticated 401, happy path (old password stops
+  working + new one logs in), wrong current password leaves the old one
+  intact, weak new password 400s.
+
+**Shipped — in-place product editing:**
+- Products was the only CRUD screen with no edit UI (noted as far back as
+  Day 7). Editing a SKU typo or a price meant deleting and recreating, which
+  *soft-deletes* the original (`isActive:false`) and orphans it from its
+  stock-movement history. The backend already had `PATCH /products/:id`
+  since Day 1; only the UI was missing.
+- `ProductsPage.tsx`: the existing create form now doubles as the edit form.
+  State went from a boolean `showForm` to a `formTarget: Product | "new" |
+  null`; each product row gets an "Edit" action that opens the form
+  prefilled from that row, and the form is `key`ed on the target id so the
+  uncontrolled inputs re-default when switching between products. Save
+  invalidates the `products`, `dashboard`, and `inventory` query caches
+  (a price/reorder edit changes stock value and low-stock math).
+- Also surfaced the "Reorder quantity" field in the form — it feeds F12's
+  reorder-suggestion floor but was previously only settable via CSV import.
+- Kept the Cost input Owner-only (unchanged), and a STAFF save now omits
+  `costCents` from the payload entirely rather than sending 0. The API
+  already ignores a STAFF-supplied cost, but sending 0 would read as an
+  intentional wipe of a value they can't even see — belt-and-suspenders
+  with the existing server-side `stripCostForStaff`.
+
+**Verified:** `npm ci && npx prisma generate && npx tsc --noEmit && npm
+test` on the backend (99/99, +4 new), `pip install -r requirements.txt`
+then `python3 -m pytest -q` on python-service (10/10, no changes there),
+`npm ci && npm run build` on the frontend — all clean. Beyond the build/
+test commands: stood up local Postgres (`pg_ctlcluster 16 main start`,
+created the `stockroom` role/db from scratch — this sandbox had neither,
+ran `prisma migrate deploy`), the built backend, and the Vite dev server,
+then drove a Playwright script end-to-end: signup → create a product →
+open Edit and confirm the form is prefilled (sku=BR-1, price=12.00,
+reorderQty=9) → change name+price and confirm the table row updates to
+"Widget Pro" / $15.50 → change password on `/account` (success message) →
+sign out → log back in with the *new* password → confirm the new-password
+mismatch validation fires. No console/page errors beyond the usual
+`/favicon.ico` 404 (there's still no favicon asset or `public/` dir — same
+benign 404 every prior session has noted).
+
+**Note on test/tooling env:** in this sandbox the `pytest` on `PATH` is a
+uv-isolated tool binary that can't see packages installed into the system
+site-packages, so `pytest -q` fails at import with `ModuleNotFoundError:
+fastapi` even after a successful `pip install`. `python3 -m pytest -q`
+works (it uses the interpreter the packages were installed for). Flagging
+for the next session so it isn't mistaken for a real test failure — the
+tests themselves are green.
+
+**Next (still from the post-MVP list):** (1) actually provision the
+read-only Postgres role `docs/DEPLOYMENT.md` documents — still the one
+deploy-doc claim untrue everywhere including local dev; (3) per-location
+reorder points (F12 sums demand correctly but can't target one location's
+stock). Beyond those: transactional email would unlock both a real
+forgot-password flow and token-based Staff invites at once, so it's
+probably the highest-leverage single addition once a provider is picked.
+
+**Blockers/decisions carried forward:**
+- Did not take the read-only DB role this session even though it's item 1
+  on the list. Doing it properly means changing local-dev setup
+  instructions (a second role + grants) and the python-service `.env`
+  contract, not just the deploy doc — a self-contained slice of its own,
+  and this session's two features were already independently verifiable
+  without it. Still the top item for next session.
+- No forgot-password flow, for the same reason it's been deferred since Day
+  13: there is no configured email provider anywhere in the stack. The
+  change-password flow shipped here is the piece that *doesn't* need email;
+  the recovery piece genuinely does.

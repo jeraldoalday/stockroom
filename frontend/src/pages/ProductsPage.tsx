@@ -3,12 +3,17 @@ import type { ChangeEvent, FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
 import { useAuth } from "../context/AuthContext";
-import { createProduct, fetchProducts, importProductsCsv } from "../api/products";
+import { createProduct, fetchProducts, importProductsCsv, updateProduct } from "../api/products";
 import type { ImportProductsResult } from "../api/products";
+import type { Product } from "../api/types";
 import { isApiError } from "../api/errors";
 
 function formatCents(cents: number): string {
   return (cents / 100).toLocaleString(undefined, { style: "currency", currency: "USD" });
+}
+
+function centsToInput(cents: number | undefined): string | undefined {
+  return cents === undefined ? undefined : (cents / 100).toFixed(2);
 }
 
 export function ProductsPage() {
@@ -16,40 +21,70 @@ export function ProductsPage() {
   const { user } = useAuth();
   const isOwner = user?.role === "OWNER";
   const [search, setSearch] = useState("");
-  const [showForm, setShowForm] = useState(false);
+  // null = form closed; a Product = editing it; "new" = the create form.
+  const [formTarget, setFormTarget] = useState<Product | "new" | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<ImportProductsResult | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const editing = formTarget !== null && formTarget !== "new" ? formTarget : null;
+
   const productsQuery = useQuery({
     queryKey: ["products", search],
     queryFn: () => fetchProducts(search || undefined),
   });
 
+  function onSaved() {
+    queryClient.invalidateQueries({ queryKey: ["products"] });
+    // Product edits change stock value and low-stock thresholds, so the
+    // dashboard and inventory views can go stale on a save too.
+    queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    queryClient.invalidateQueries({ queryKey: ["inventory"] });
+    setFormTarget(null);
+  }
+
+  function onSaveError(err: unknown, fallback: string) {
+    setFormError(isApiError(err) ? err.response?.data?.error ?? fallback : fallback);
+  }
+
   const createMutation = useMutation({
     mutationFn: createProduct,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["products"] });
-      setShowForm(false);
-    },
-    onError: (err) => {
-      setFormError(isApiError(err) ? err.response?.data?.error ?? "Could not create product" : "Could not create product");
-    },
+    onSuccess: onSaved,
+    onError: (err) => onSaveError(err, "Could not create product"),
   });
 
-  function handleCreate(e: FormEvent<HTMLFormElement>) {
+  const updateMutation = useMutation({
+    mutationFn: ({ id, ...payload }: { id: string } & Parameters<typeof updateProduct>[1]) =>
+      updateProduct(id, payload),
+    onSuccess: onSaved,
+    onError: (err) => onSaveError(err, "Could not update product"),
+  });
+
+  const saving = createMutation.isPending || updateMutation.isPending;
+
+  function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setFormError(null);
     const form = new FormData(e.currentTarget);
-    createMutation.mutate({
+    const payload = {
       sku: String(form.get("sku")),
       name: String(form.get("name")),
       priceCents: Math.round(Number(form.get("price")) * 100) || 0,
-      costCents: Math.round(Number(form.get("cost")) * 100) || 0,
+      // The Cost input only renders for an Owner — a STAFF caller must not
+      // send costCents at all (the API ignores it, but sending 0 would read
+      // as an intentional wipe of a value they can't even see).
+      ...(isOwner ? { costCents: Math.round(Number(form.get("cost")) * 100) || 0 } : {}),
       reorderPoint: Number(form.get("reorderPoint")) || 0,
-    });
+      reorderQty: Number(form.get("reorderQty")) || 0,
+    };
+
+    if (editing) {
+      updateMutation.mutate({ id: editing.id, ...payload });
+    } else {
+      createMutation.mutate(payload);
+    }
   }
 
   async function handleImport(e: ChangeEvent<HTMLInputElement>) {
@@ -93,10 +128,13 @@ export function ProductsPage() {
           </button>
           <button
             type="button"
-            onClick={() => setShowForm((v) => !v)}
+            onClick={() => {
+              setFormError(null);
+              setFormTarget((current) => (current === null ? "new" : null));
+            }}
             className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
           >
-            {showForm ? "Cancel" : "Add product"}
+            {formTarget !== null ? "Cancel" : "Add product"}
           </button>
         </div>
       </div>
@@ -118,38 +156,87 @@ export function ProductsPage() {
         </div>
       )}
 
-      {showForm && (
-        <form onSubmit={handleCreate} className="mb-6 grid grid-cols-2 gap-4 rounded-lg border border-gray-200 bg-white p-4">
+      {formTarget !== null && (
+        <form
+          // Remounts the form when switching between create and editing a
+          // different product, so the uncontrolled inputs pick up new defaults.
+          key={editing?.id ?? "new"}
+          onSubmit={handleSubmit}
+          className="mb-6 grid grid-cols-2 gap-4 rounded-lg border border-gray-200 bg-white p-4"
+        >
+          <div className="col-span-2 text-sm font-medium text-gray-900">
+            {editing ? `Edit ${editing.sku}` : "New product"}
+          </div>
           {formError && <div className="col-span-2 text-sm text-red-600">{formError}</div>}
           <div>
             <label className="block text-sm font-medium text-gray-700">SKU</label>
-            <input name="sku" required className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+            <input
+              name="sku"
+              required
+              defaultValue={editing?.sku}
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+            />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700">Name</label>
-            <input name="name" required className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+            <input
+              name="name"
+              required
+              defaultValue={editing?.name}
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+            />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700">Price ($)</label>
-            <input name="price" type="number" step="0.01" min="0" className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+            <input
+              name="price"
+              type="number"
+              step="0.01"
+              min="0"
+              defaultValue={centsToInput(editing?.priceCents)}
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+            />
           </div>
           {isOwner && (
             <div>
               <label className="block text-sm font-medium text-gray-700">Cost ($)</label>
-              <input name="cost" type="number" step="0.01" min="0" className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+              <input
+                name="cost"
+                type="number"
+                step="0.01"
+                min="0"
+                defaultValue={centsToInput(editing?.costCents)}
+                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+              />
             </div>
           )}
           <div>
             <label className="block text-sm font-medium text-gray-700">Reorder point</label>
-            <input name="reorderPoint" type="number" min="0" className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+            <input
+              name="reorderPoint"
+              type="number"
+              min="0"
+              defaultValue={editing?.reorderPoint}
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Reorder quantity</label>
+            <input
+              name="reorderQty"
+              type="number"
+              min="0"
+              defaultValue={editing?.reorderQty}
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+            />
           </div>
           <div className="col-span-2">
             <button
               type="submit"
-              disabled={createMutation.isPending}
+              disabled={saving}
               className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
             >
-              {createMutation.isPending ? "Saving..." : "Save product"}
+              {saving ? "Saving..." : editing ? "Save changes" : "Save product"}
             </button>
           </div>
         </form>
@@ -170,22 +257,23 @@ export function ProductsPage() {
               <th className="px-4 py-2 text-left font-medium text-gray-600">Name</th>
               <th className="px-4 py-2 text-right font-medium text-gray-600">Price</th>
               <th className="px-4 py-2 text-right font-medium text-gray-600">Reorder point</th>
+              <th className="px-4 py-2 text-right font-medium text-gray-600">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {productsQuery.isLoading && (
               <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-gray-500">Loading...</td>
+                <td colSpan={5} className="px-4 py-6 text-center text-gray-500">Loading...</td>
               </tr>
             )}
             {productsQuery.isError && (
               <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-red-600">Failed to load products.</td>
+                <td colSpan={5} className="px-4 py-6 text-center text-red-600">Failed to load products.</td>
               </tr>
             )}
             {productsQuery.data?.items.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-gray-500">No products yet.</td>
+                <td colSpan={5} className="px-4 py-6 text-center text-gray-500">No products yet.</td>
               </tr>
             )}
             {productsQuery.data?.items.map((product) => (
@@ -194,6 +282,18 @@ export function ProductsPage() {
                 <td className="px-4 py-2">{product.name}</td>
                 <td className="px-4 py-2 text-right">{formatCents(product.priceCents)}</td>
                 <td className="px-4 py-2 text-right">{product.reorderPoint}</td>
+                <td className="px-4 py-2 text-right">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFormError(null);
+                      setFormTarget(product);
+                    }}
+                    className="text-xs text-brand-600 hover:underline"
+                  >
+                    Edit
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>

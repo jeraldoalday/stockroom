@@ -27,6 +27,13 @@ export async function createProduct(payload: CreateProductPayload): Promise<Prod
   return res.data;
 }
 
+export type UpdateProductPayload = Partial<CreateProductPayload>;
+
+export async function updateProduct(id: string, payload: UpdateProductPayload): Promise<Product> {
+  const res = await apiClient.patch<Product>(`/products/${id}`, payload);
+  return res.data;
+}
+
 export async function fetchCategories(): Promise<Category[]> {
   const res = await apiClient.get<Category[]>("/categories");
   return res.data;

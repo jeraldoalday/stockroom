@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { asyncHandler } from "../lib/asyncHandler";
+import { requireAuth } from "../middleware/auth";
 import { ApiError } from "../lib/errors";
 import {
   hashPassword,
@@ -136,6 +137,39 @@ router.post(
     });
 
     res.json({ accessToken });
+  })
+);
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(8).max(72),
+});
+
+// Self-service password change — the only password-lifecycle flow this
+// product has (no email provider is configured anywhere, so a token-based
+// reset-by-email flow isn't available yet; see docs/PROGRESS.md). Requires
+// knowing the current password rather than an admin override, so an Owner
+// can't silently take over a Staff account's login.
+router.patch(
+  "/password",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const body = changePasswordSchema.parse(req.body);
+
+    const user = await prisma.user.findUnique({ where: { id: req.auth!.userId } });
+    if (!user) {
+      throw ApiError.unauthorized("User no longer exists");
+    }
+
+    const valid = await verifyPassword(body.currentPassword, user.passwordHash);
+    if (!valid) {
+      throw ApiError.unauthorized("Current password is incorrect");
+    }
+
+    const passwordHash = await hashPassword(body.newPassword);
+    await prisma.user.update({ where: { id: user.id }, data: { passwordHash } });
+
+    res.status(204).send();
   })
 );
 

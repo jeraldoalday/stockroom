@@ -44,9 +44,12 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="px-4 py-4 border-t border-gray-200 text-sm">
           <div className="font-medium">{user?.name}</div>
           <div className="text-gray-500">{user?.email}</div>
+          <NavLink to="/account" className="mt-2 block text-brand-600 hover:underline">
+            Account
+          </NavLink>
           <button
             onClick={logout}
-            className="mt-2 text-brand-600 hover:underline"
+            className="mt-1 text-brand-600 hover:underline"
             type="button"
           >
             Sign out

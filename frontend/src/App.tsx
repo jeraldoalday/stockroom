@@ -12,6 +12,7 @@ import { PurchaseOrdersPage } from "./pages/PurchaseOrdersPage";
 import { SalesOrdersPage } from "./pages/SalesOrdersPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { TeamPage } from "./pages/TeamPage";
+import { AccountPage } from "./pages/AccountPage";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 
 export function App() {
@@ -104,6 +105,14 @@ export function App() {
         element={
           <ProtectedRoute ownerOnly>
             <TeamPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/account"
+        element={
+          <ProtectedRoute>
+            <AccountPage />
           </ProtectedRoute>
         }
       />

@@ -8,8 +8,12 @@ import { ApiError } from "../lib/errors";
 const router = Router();
 router.use(requireAuth);
 
+// Archived customers stay in the database because order history points at
+// them; `status` is how the list decides whether to show them. Defaults to
+// "active", so every existing caller behaves exactly as it did.
 const listQuerySchema = z.object({
   search: z.string().trim().min(1).max(200).optional(),
+  status: z.enum(["active", "archived", "all"]).default("active"),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
 });
@@ -22,6 +26,7 @@ router.get(
 
     const where = {
       organizationId,
+      ...(query.status === "all" ? {} : { isActive: query.status === "active" }),
       ...(query.search
         ? { name: { contains: query.search, mode: "insensitive" as const } }
         : {}),
@@ -94,6 +99,11 @@ router.patch(
   })
 );
 
+// Archive, not delete. This used to hard-delete and refuse with a 409 once
+// any sales order existed, which was a dead end: the customer you most
+// want out of the dropdown is the one you have actually stopped trading
+// with, and that is precisely the one with history. Archiving always
+// succeeds, keeps the order history intact, and is reversible.
 router.delete(
   "/:id",
   asyncHandler(async (req, res) => {
@@ -104,16 +114,34 @@ router.delete(
     if (!customer) {
       throw ApiError.notFound("Customer not found");
     }
-
-    const openOrders = await prisma.salesOrder.count({
-      where: { organizationId, customerId: customer.id },
-    });
-    if (openOrders > 0) {
-      throw ApiError.conflict("Cannot delete a customer with sales order history");
+    if (!customer.isActive) {
+      throw ApiError.conflict("This customer is already archived");
     }
 
-    await prisma.customer.delete({ where: { id: customer.id } });
+    await prisma.customer.update({ where: { id: customer.id }, data: { isActive: false } });
     res.status(204).send();
+  })
+);
+
+router.post(
+  "/:id/restore",
+  asyncHandler(async (req, res) => {
+    const organizationId = req.auth!.organizationId;
+    const customer = await prisma.customer.findFirst({
+      where: { id: req.params.id, organizationId },
+    });
+    if (!customer) {
+      throw ApiError.notFound("Customer not found");
+    }
+    if (customer.isActive) {
+      throw ApiError.conflict("This customer is not archived");
+    }
+
+    const restored = await prisma.customer.update({
+      where: { id: customer.id },
+      data: { isActive: true },
+    });
+    res.json(restored);
   })
 );
 

@@ -169,6 +169,11 @@ model Supplier {
   name           String
   email          String?
   phone          String?
+  // Archiving rather than deleting, for the same reason Product has this:
+  // the record is referenced by order history, so removing it would either
+  // corrupt that history or be refused outright. Before this, a supplier
+  // with any orders simply could not be removed from the list at all.
+  isActive       Boolean      @default(true)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
@@ -185,6 +190,11 @@ model Customer {
   name           String
   email          String?
   phone          String?
+  // Archiving rather than deleting, for the same reason Product has this:
+  // the record is referenced by order history, so removing it would either
+  // corrupt that history or be refused outright. Before this, a customer
+  // with any orders simply could not be removed from the list at all.
+  isActive       Boolean      @default(true)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 

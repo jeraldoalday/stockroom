@@ -1,8 +1,11 @@
 import { apiClient } from "./client";
 import type { Category, Product, ProductListResponse } from "./types";
 
+export type ProductStatusFilter = "active" | "archived" | "all";
+
 export interface ProductQuery {
   search?: string;
+  status?: ProductStatusFilter;
   pageSize?: number;
 }
 
@@ -42,5 +45,17 @@ export async function importProductsCsv(csvText: string): Promise<ImportProducts
   const res = await apiClient.post<ImportProductsResult>("/products/import", csvText, {
     headers: { "Content-Type": "text/csv" },
   });
+  return res.data;
+}
+
+// DELETE is a soft delete server-side (the SKU stays referenced by
+// historical movements and order lines), so the UI calls it "archive"
+// rather than "delete" — there is a way back.
+export async function archiveProduct(id: string): Promise<void> {
+  await apiClient.delete(`/products/${id}`);
+}
+
+export async function restoreProduct(id: string): Promise<Product> {
+  const res = await apiClient.post<Product>(`/products/${id}/restore`);
   return res.data;
 }

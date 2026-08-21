@@ -146,11 +146,19 @@ add a second instance.
   and counters reset on every deploy. This is an accepted trade for a
   single-container MVP; moving to more than one instance means moving the
   counters to Redis or the database first.
-- **Refresh tokens are not rotated or revocable.** A refresh token is valid
-  for its full 7 days, `/api/auth/refresh` does not issue a new one, and
-  there is no server-side token store — so signing out clears the browser
-  but does not invalidate anything. A stolen refresh token works until it
-  expires. Rotation needs server-side state that this build does not have.
+- **Access tokens are not revocable.** Refresh tokens now are: they rotate
+  on every use, are recorded server-side by hash, and are revoked by signing
+  out or by any password change, with a replayed token burning its whole
+  rotation family. Access tokens remain plain bearer tokens with no
+  server-side check, so a revocation takes up to `JWT_ACCESS_TTL` (15
+  minutes by default) to be fully effective. That window is the reason to
+  keep the TTL short; shortening it further trades refresh traffic for a
+  smaller exposure.
+- **The refresh token table is never pruned.** Rotation writes a row per
+  refresh, so an active session accumulates roughly one row per 15 minutes.
+  Nothing deletes expired or revoked rows yet — schedule a periodic
+  `DELETE FROM refresh_tokens WHERE "expiresAt" < now()` before this runs
+  for any length of time.
 - **No password reset and no email.** There is no SMTP or provider
   configuration anywhere in the stack. Adding a staff member means an Owner
   choosing a temporary password and telling them directly. A user who

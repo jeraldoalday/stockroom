@@ -197,8 +197,8 @@ Be straight about these; they're all in `docs/DEPLOYMENT.md` in more
 detail. Forgot-password works end to end, but no email provider is
 configured — the shipped `EmailSender` logs the reset link to the server
 console instead of sending it, and invites are still an Owner-set temporary
-password. Refresh tokens can't be revoked, so signing out clears the browser
-but not the token. Rate limiting is per-process and weakens behind a load
-balancer. Revenue in the trend report is only attributed for sales made
-through a sales order — a SALE recorded directly on the stock movements
-screen has no line price to read, and so contributes units but not revenue.
+password. Signing out and any password change now revoke the session
+server-side, though an already-issued access token stays valid for up to
+15 minutes. Rate limiting is per-process and weakens behind a load
+balancer. The refresh token table isn't pruned yet, so it grows a row
+per refresh.

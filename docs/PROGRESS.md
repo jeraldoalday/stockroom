@@ -1017,3 +1017,111 @@ distinction is worth recording rather than glossing.
    to the delete guards; refresh token rotation; a relation on
    `SalesOrder.locationId` so the database enforces what the route now
    checks by hand.
+
+## Day 17 (post-MVP) — 2026-08-22
+
+**Planned:** the top of the v1.1 list left at the end of Day 14 —
+revocable refresh tokens, a price on SALE movements, and the smaller
+archive/relation items.
+
+**Shipped — session lifecycle (v1.1 item 2):**
+
+- `RefreshToken` is now recorded server-side, hashed, so a session can
+  actually be ended. This closes a hole that made one of the product's own
+  features useless: a password reset did not lock out whoever else was
+  holding a refresh token, and the entire reason to reset a password under
+  suspicion is to stop that person. They kept working access for a further
+  seven days. Signing out had the same shape — it cleared the browser and
+  nothing else.
+- The token is still a signed JWT rather than an opaque string: the
+  signature check stays a cheap first gate that rejects garbage without a
+  database hit, and the token stays self-describing when debugging one. The
+  row is what makes it revocable, which a JWT alone never can be.
+- Refreshing rotates. The presented token is revoked and a new one
+  returned, so a token is only ever good once. A token presented after it
+  has been rotated away means someone is replaying an already-exchanged
+  token; nothing in the request distinguishes a thief from a client racing
+  itself, so the whole rotation family is revoked (OAuth 2.0 BCP §4.14.2).
+  Each login starts its own family, so devices are independent.
+- `POST /api/auth/logout` ends a session. Unauthenticated on purpose — the
+  access token has usually expired by the time anyone signs out, and
+  holding the refresh token is the proof. Always 204, so it can't be used
+  to probe token validity.
+- Password change and password reset revoke every session for that user.
+- Refresh re-reads role and organization instead of trusting the old token,
+  so a promotion or demotion lands on the next refresh.
+
+Found while building it: `signRefreshToken` signed a payload of just
+`{ sub }`, so the JWT was `{sub, iat, exp}` with one-second resolution —
+two tokens minted for the same user in the same second were byte-identical.
+Harmless while tokens were stateless, fatal once they're hashed under a
+unique index: signing in twice quickly would have failed at the database.
+A random `jti` fixes it. Caught by a test asserting two logins produce two
+families, which failed because they produced one token.
+
+**Shipped — revenue attribution (v1.1 item 3):**
+
+- `StockMovement.unitPriceCents`. Revenue was recoverable only by joining
+  back to a sales order line, so a counter sale — a SALE posted straight to
+  `/stock-movements`, the ordinary case for a shop — contributed units and
+  zero revenue. The chart drew, the totals added up, and takings were
+  understated with nothing on screen to say so, which is worse than an
+  error.
+- Rejected on anything but a SALE; zero allowed and distinct from absent.
+  Fulfilling a sales order copies the line price onto each movement.
+- The trend query prefers the movement's price and keeps the join as a
+  fallback, so rows written before the column report exactly what they did
+  before. The movements CSV export carries the price too.
+- The seed prices its ~1,400 sales, so the demo's trend shows $12,868.82
+  over 30 days rather than a flat zero line — otherwise the demo data would
+  have been a live demonstration of the gap just closed.
+
+**Shipped — smaller items from the same list:**
+
+- Suppliers and customers archive instead of hard-deleting. The old
+  behaviour 409'd as soon as any order referenced them, which made the
+  records you most want out of a dropdown — the ones you've stopped trading
+  with — the only ones you couldn't remove, with no alternative offered.
+  Now `DELETE` archives, `/restore` returns them, and the list takes
+  `?status=`. `GET /:id` still resolves archived records, or every order
+  that used one would break.
+- `SalesOrder.locationId` is a declared relation with a RESTRICT foreign
+  key. It was a bare column, so only application code stopped a location
+  being deleted out from under the orders that shipped from it.
+- `/api/auth/forgot-password` and `/reset-password` are rate-limited.
+  Forgot-password is the one unauthenticated endpoint whose side effect
+  lands on a stranger's inbox, and it was unmetered. The throttle applies
+  to unknown addresses identically, since the endpoint answers 202 either
+  way to avoid being a user-enumeration oracle and a limiter that fired
+  only for real accounts would hand that oracle straight back.
+
+**Frontend:** the refresh interceptor persists the rotated token (dropping
+it would sign the user out on the *next* refresh), signing out calls the
+logout endpoint, and the Account page signs out after a password change
+rather than decaying into a session the server has already ended.
+
+**Verified:** backend typecheck, lint, 231 tests (up from 179);
+python-service 32 tests (up from 30); frontend lint and build. All clean.
+
+Still not verified against a real Postgres or a browser — no database is
+available on this machine. That matters more than usual this session: four
+hand-written migrations landed (refresh tokens, movement price, supplier/
+customer archive flags, the sales-order foreign key) and none has been run.
+The sales-order FK in particular will fail to apply if any existing row
+points at a deleted location, which is exactly the corruption it exists to
+prevent — check for orphans before running it against real data.
+
+**Next:**
+
+1. **Transactional email.** Unchanged as the top item: forgot-password
+   works end to end but the shipped sender logs to the console, and invites
+   are still an Owner-set temporary password.
+2. **Prune the refresh token table.** Rotation writes a row per refresh, so
+   an active session accumulates one roughly every 15 minutes and nothing
+   deletes expired or revoked rows.
+3. **SQL aggregates for the dashboard**, before the SKU count or the
+   instance count grows.
+4. **Shared-state rate limiting**, required before a second API instance.
+5. Smaller: archive/restore for locations, matching products, suppliers and
+   customers; a per-session list on the Account page now that sessions are
+   real records, so a user can see and end them individually.

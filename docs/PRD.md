@@ -189,15 +189,18 @@ blocking for a design-partner pilot:
   temporary password rather than an emailed link. Both are one
   `EmailSender` implementation away from real once a provider is picked.
   This remains the largest gap for a real customer.
-- **Refresh tokens cannot be revoked.** Signing out clears the browser and
-  nothing else; a stolen token is valid for its full 7 days. Fixing it
-  needs server-side token state.
+- ~~**Refresh tokens cannot be revoked.**~~ **Resolved (Day 17):** refresh
+  tokens rotate on use, are recorded server-side, and are revoked by
+  signing out or by any password change. Access tokens are still bearer
+  tokens with a 15-minute life and no server-side check, so a revocation
+  takes up to that long to be complete.
 - **Rate limiting is per-process**, so it weakens as soon as there is more
   than one API instance.
-- **Revenue is only attributed to sales made through a sales order.** A
-  SALE recorded directly on the stock movements screen has no line price to
-  read, so it contributes units but not revenue to the trend report. A data
-  model gap, not a query bug: the fix is capturing a price on the movement.
+- ~~**Revenue is only attributed to sales made through a sales order.**~~
+  **Resolved (Day 17):** `StockMovement.unitPriceCents` records what a sale
+  went out at, and the trend report prefers it over the order line.
+  Movements written before that column existed still have no price of their
+  own and continue to fall back to the line.
 - **Dashboard aggregates are computed in application code**, not SQL.
   Within the 10k SKU target in §7; a blocker beyond it.
 - **The read-only DB role for the Python service** is provisioned

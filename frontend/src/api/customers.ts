@@ -1,8 +1,11 @@
 import { apiClient } from "./client";
 import type { Customer, CustomerListResponse } from "./types";
 
+export type CustomerStatusFilter = "active" | "archived" | "all";
+
 export interface CustomerQuery {
   search?: string;
+  status?: CustomerStatusFilter;
   page?: number;
   pageSize?: number;
 }
@@ -29,6 +32,13 @@ export async function updateCustomer(id: string, payload: Partial<CustomerPayloa
   return res.data;
 }
 
-export async function deleteCustomer(id: string): Promise<void> {
+// A soft delete server-side: order history points at the record, so it is
+// archived rather than removed, and can be restored.
+export async function archiveCustomer(id: string): Promise<void> {
   await apiClient.delete(`/customers/${id}`);
+}
+
+export async function restoreCustomer(id: string): Promise<Customer> {
+  const res = await apiClient.post<Customer>(`/customers/${id}/restore`);
+  return res.data;
 }

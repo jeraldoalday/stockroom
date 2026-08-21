@@ -22,7 +22,7 @@ export interface ConfirmDialogProps {
  * show the record's name in the app's own voice, and — the practical
  * problem here — it can't stay open while the mutation is in flight, so
  * there's nowhere to put the "Deleting..." state or a server-side error
- * like "Cannot delete a supplier with purchase order history".
+ * like "Cannot delete a location that has inventory records".
  */
 export function ConfirmDialog({
   open,

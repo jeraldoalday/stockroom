@@ -1,8 +1,11 @@
 import { apiClient } from "./client";
 import type { Supplier, SupplierListResponse } from "./types";
 
+export type SupplierStatusFilter = "active" | "archived" | "all";
+
 export interface SupplierQuery {
   search?: string;
+  status?: SupplierStatusFilter;
   page?: number;
   pageSize?: number;
 }
@@ -29,6 +32,13 @@ export async function updateSupplier(id: string, payload: Partial<SupplierPayloa
   return res.data;
 }
 
-export async function deleteSupplier(id: string): Promise<void> {
+// A soft delete server-side: order history points at the record, so it is
+// archived rather than removed, and can be restored.
+export async function archiveSupplier(id: string): Promise<void> {
   await apiClient.delete(`/suppliers/${id}`);
+}
+
+export async function restoreSupplier(id: string): Promise<Supplier> {
+  const res = await apiClient.post<Supplier>(`/suppliers/${id}/restore`);
+  return res.data;
 }

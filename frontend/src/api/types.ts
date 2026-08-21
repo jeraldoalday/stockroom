@@ -59,6 +59,7 @@ export interface Supplier {
   name: string;
   email: string | null;
   phone: string | null;
+  isActive: boolean;
 }
 
 export interface SupplierListResponse {
@@ -73,6 +74,7 @@ export interface Customer {
   name: string;
   email: string | null;
   phone: string | null;
+  isActive: boolean;
 }
 
 export interface CustomerListResponse {

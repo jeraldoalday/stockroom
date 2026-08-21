@@ -2,26 +2,34 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
-import { createSupplier, deleteSupplier, fetchSuppliers } from "../api/suppliers";
+import { archiveSupplier, createSupplier, fetchSuppliers, restoreSupplier } from "../api/suppliers";
 import { isApiError } from "../api/errors";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useConfirmation } from "../components/useConfirmation";
 import { Pagination } from "../components/Pagination";
 import type { Supplier } from "../api/types";
+import type { SupplierStatusFilter } from "../api/suppliers";
 
 const PAGE_SIZE = 25;
+
+const STATUS_TABS: { value: SupplierStatusFilter; label: string }[] = [
+  { value: "active", label: "Active" },
+  { value: "archived", label: "Archived" },
+  { value: "all", label: "All" },
+];
 
 export function SuppliersPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [status, setStatus] = useState<SupplierStatusFilter>("active");
   const [showForm, setShowForm] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
 
   const suppliersQuery = useQuery({
-    queryKey: ["suppliers", search, page],
-    queryFn: () => fetchSuppliers({ page, pageSize: PAGE_SIZE, ...(search ? { search } : {}) }),
+    queryKey: ["suppliers", search, status, page],
+    queryFn: () => fetchSuppliers({ page, pageSize: PAGE_SIZE, status, ...(search ? { search } : {}) }),
     placeholderData: (previous) => previous,
   });
 
@@ -36,13 +44,21 @@ export function SuppliersPage() {
     },
   });
 
-  const pendingDelete = useConfirmation<Supplier>();
+  const pendingArchive = useConfirmation<Supplier>();
 
-  const deleteMutation = useMutation({
-    mutationFn: deleteSupplier,
+  const archiveMutation = useMutation({
+    mutationFn: archiveSupplier,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["suppliers"] }),
     onError: (err) => {
-      setRowError(isApiError(err) ? err.response?.data?.error ?? "Could not delete supplier" : "Could not delete supplier");
+      setRowError(isApiError(err) ? err.response?.data?.error ?? "Could not archive supplier" : "Could not archive supplier");
+    },
+  });
+
+  const restoreMutation = useMutation({
+    mutationFn: restoreSupplier,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["suppliers"] }),
+    onError: (err) => {
+      setRowError(isApiError(err) ? err.response?.data?.error ?? "Could not restore supplier" : "Could not restore supplier");
     },
   });
 
@@ -97,6 +113,25 @@ export function SuppliersPage() {
         </form>
       )}
 
+      <div className="mb-4 flex gap-1 rounded-md border border-gray-200 bg-white p-1 w-fit">
+        {STATUS_TABS.map((tab) => (
+          <button
+            key={tab.value}
+            type="button"
+            onClick={() => {
+              setRowError(null);
+              setStatus(tab.value);
+              setPage(1);
+            }}
+            className={`rounded px-3 py-1.5 text-sm font-medium ${
+              status === tab.value ? "bg-brand-50 text-brand-700" : "text-gray-600 hover:bg-gray-100"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       <input
         placeholder="Search by name..."
         value={search}
@@ -136,21 +171,41 @@ export function SuppliersPage() {
               </tr>
             )}
             {suppliersQuery.data?.items.map((supplier) => (
-              <tr key={supplier.id}>
-                <td className="px-4 py-2">{supplier.name}</td>
+              <tr key={supplier.id} className={supplier.isActive ? undefined : "bg-gray-50 text-gray-500"}>
+                <td className="px-4 py-2">
+                  {supplier.name}
+                  {!supplier.isActive && (
+                    <span className="ml-2 rounded-full bg-gray-200 px-2 py-0.5 text-xs font-medium text-gray-600">
+                      Archived
+                    </span>
+                  )}
+                </td>
                 <td className="px-4 py-2 text-gray-500">{supplier.email ?? "—"}</td>
                 <td className="px-4 py-2 text-gray-500">{supplier.phone ?? "—"}</td>
                 <td className="px-4 py-2 text-right">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRowError(null);
-                      pendingDelete.request(supplier);
-                    }}
-                    className="text-xs text-red-600 hover:underline"
-                  >
-                    Delete
-                  </button>
+                  {supplier.isActive ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRowError(null);
+                        pendingArchive.request(supplier);
+                      }}
+                      className="text-xs text-red-600 hover:underline"
+                    >
+                      Archive
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRowError(null);
+                        restoreMutation.mutate(supplier.id);
+                      }}
+                      className="text-xs text-brand-600 hover:underline"
+                    >
+                      Restore
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -167,18 +222,19 @@ export function SuppliersPage() {
       />
 
       <ConfirmDialog
-        open={pendingDelete.isOpen}
-        title="Delete this supplier?"
+        open={pendingArchive.isOpen}
+        title="Archive this supplier?"
         description={
           <>
-            <strong>{pendingDelete.target?.name}</strong> will be removed permanently. Suppliers
-            with purchase order history can't be deleted.
+            <strong>{pendingArchive.target?.name}</strong> will be hidden from lists and from
+            the new-order dropdowns. Their purchase orders are kept, and you can restore them
+            from the Archived tab at any time.
           </>
         }
-        confirmLabel="Delete supplier"
-        busy={deleteMutation.isPending}
-        onCancel={pendingDelete.cancel}
-        onConfirm={() => pendingDelete.confirm((supplier) => deleteMutation.mutate(supplier.id))}
+        confirmLabel="Archive supplier"
+        busy={archiveMutation.isPending}
+        onCancel={pendingArchive.cancel}
+        onConfirm={() => pendingArchive.confirm((supplier) => archiveMutation.mutate(supplier.id))}
       />
     </AppShell>
   );

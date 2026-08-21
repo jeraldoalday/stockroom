@@ -6,6 +6,7 @@ import { fetchProducts } from "../api/products";
 import { fetchLocations } from "../api/locations";
 import { createStockMovement, fetchStockMovements, transferStock } from "../api/stockMovements";
 import { isApiError } from "../api/errors";
+import { Pagination } from "../components/Pagination";
 import type { MovementType } from "../api/types";
 
 const MOVEMENT_LABELS: Record<MovementType, string> = {
@@ -16,17 +17,53 @@ const MOVEMENT_LABELS: Record<MovementType, string> = {
   ADJUSTMENT: "Adjusted",
 };
 
+const PAGE_SIZE = 25;
+
+const MOVEMENT_TYPES = Object.keys(MOVEMENT_LABELS) as MovementType[];
+
 export function StockMovementsPage() {
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<"movement" | "transfer" | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [movementType, setMovementType] = useState<"RECEIVE" | "SALE" | "ADJUSTMENT">("RECEIVE");
+  const [filters, setFilters] = useState<{ productId: string; locationId: string; type: string }>({
+    productId: "",
+    locationId: "",
+    type: "",
+  });
+  const [page, setPage] = useState(1);
+
+  // Any filter change has to reset the page: staying on page 4 while
+  // narrowing to a filter with one page of results shows an empty table
+  // and looks like the filter matched nothing.
+  function updateFilter(key: keyof typeof filters, value: string) {
+    setFilters((current) => ({ ...current, [key]: value }));
+    setPage(1);
+  }
+
+  const hasFilters = Boolean(filters.productId || filters.locationId || filters.type);
 
   const productsQuery = useQuery({ queryKey: ["products", "all"], queryFn: () => fetchProducts({ pageSize: 100 }) });
   const locationsQuery = useQuery({ queryKey: ["locations"], queryFn: fetchLocations });
-  const movementsQuery = useQuery({ queryKey: ["stock-movements"], queryFn: () => fetchStockMovements() });
+  const movementsQuery = useQuery({
+    queryKey: ["stock-movements", filters, page],
+    queryFn: () =>
+      fetchStockMovements({
+        page,
+        pageSize: PAGE_SIZE,
+        ...(filters.productId ? { productId: filters.productId } : {}),
+        ...(filters.locationId ? { locationId: filters.locationId } : {}),
+        ...(filters.type ? { type: filters.type as MovementType } : {}),
+      }),
+    // Keeps the current page rendered while the next one loads, instead of
+    // blanking the table on every page step.
+    placeholderData: (previous) => previous,
+  });
 
   function invalidateAfterMovement() {
+    // Newest first, so a movement recorded while paged deeper is only
+    // visible from page 1.
+    setPage(1);
     queryClient.invalidateQueries({ queryKey: ["stock-movements"] });
     queryClient.invalidateQueries({ queryKey: ["inventory"] });
     queryClient.invalidateQueries({ queryKey: ["dashboard"] });
@@ -239,6 +276,66 @@ export function StockMovementsPage() {
         </form>
       )}
 
+      <div className="mb-4 flex flex-wrap items-end gap-3 rounded-lg border border-gray-200 bg-white p-3">
+        <div>
+          <label className="block text-xs font-medium text-gray-500">Product</label>
+          <select
+            value={filters.productId}
+            onChange={(e) => updateFilter("productId", e.target.value)}
+            className="mt-1 rounded-md border border-gray-300 px-3 py-1.5 text-sm"
+          >
+            <option value="">All products</option>
+            {productsQuery.data?.items.map((product) => (
+              <option key={product.id} value={product.id}>
+                {product.name} ({product.sku})
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-500">Location</label>
+          <select
+            value={filters.locationId}
+            onChange={(e) => updateFilter("locationId", e.target.value)}
+            className="mt-1 rounded-md border border-gray-300 px-3 py-1.5 text-sm"
+          >
+            <option value="">All locations</option>
+            {locationsQuery.data?.map((location) => (
+              <option key={location.id} value={location.id}>
+                {location.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-500">Type</label>
+          <select
+            value={filters.type}
+            onChange={(e) => updateFilter("type", e.target.value)}
+            className="mt-1 rounded-md border border-gray-300 px-3 py-1.5 text-sm"
+          >
+            <option value="">All types</option>
+            {MOVEMENT_TYPES.map((type) => (
+              <option key={type} value={type}>
+                {MOVEMENT_LABELS[type]}
+              </option>
+            ))}
+          </select>
+        </div>
+        {hasFilters && (
+          <button
+            type="button"
+            onClick={() => {
+              setFilters({ productId: "", locationId: "", type: "" });
+              setPage(1);
+            }}
+            className="pb-1.5 text-sm text-brand-600 hover:underline"
+          >
+            Clear filters
+          </button>
+        )}
+      </div>
+
       <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
         <table className="min-w-full divide-y divide-gray-200 text-sm">
           <thead className="bg-gray-50">
@@ -249,22 +346,25 @@ export function StockMovementsPage() {
               <th className="px-4 py-2 text-left font-medium text-gray-600">Type</th>
               <th className="px-4 py-2 text-right font-medium text-gray-600">Qty</th>
               <th className="px-4 py-2 text-left font-medium text-gray-600">Reason</th>
+              <th className="px-4 py-2 text-left font-medium text-gray-600">Recorded by</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {movementsQuery.isLoading && (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-gray-500">Loading...</td>
+                <td colSpan={7} className="px-4 py-6 text-center text-gray-500">Loading...</td>
               </tr>
             )}
             {movementsQuery.isError && (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-red-600">Failed to load stock movements.</td>
+                <td colSpan={7} className="px-4 py-6 text-center text-red-600">Failed to load stock movements.</td>
               </tr>
             )}
             {movementsQuery.data?.items.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-gray-500">No stock movements yet.</td>
+                <td colSpan={7} className="px-4 py-6 text-center text-gray-500">
+                  {hasFilters ? "No stock movements match these filters." : "No stock movements yet."}
+                </td>
               </tr>
             )}
             {movementsQuery.data?.items.map((movement) => (
@@ -275,11 +375,20 @@ export function StockMovementsPage() {
                 <td className="px-4 py-2">{MOVEMENT_LABELS[movement.type]}</td>
                 <td className="px-4 py-2 text-right">{movement.quantity > 0 ? `+${movement.quantity}` : movement.quantity}</td>
                 <td className="px-4 py-2 text-gray-500">{movement.reason ?? "—"}</td>
+                <td className="px-4 py-2 text-gray-500">{movement.actor?.name ?? "—"}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      <Pagination
+        page={movementsQuery.data?.page ?? page}
+        pageSize={movementsQuery.data?.pageSize ?? PAGE_SIZE}
+        total={movementsQuery.data?.total ?? 0}
+        onPageChange={setPage}
+        label="movements"
+      />
     </AppShell>
   );
 }

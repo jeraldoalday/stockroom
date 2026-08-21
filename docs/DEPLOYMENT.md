@@ -25,22 +25,28 @@ connection string — call it `RAW_DATABASE_URL`, e.g.
 ### Database user
 
 PRD §8 specifies the Python service should run against a SELECT-only DB
-role, not the same role the Node API uses to write. This was never set up
-in local dev (every session so far has used one shared `stockroom` role,
-noted as a known gap) — for a real deployment, create a second role:
+role, not the same role the Node API uses to write. Local dev now
+provisions this automatically (`db/init/01-create-readonly-role.sql`, run
+by `docker compose up -d db` or manually against a non-Docker Postgres —
+see the README), but that script's role and password are fixed local-dev
+values. For a real deployment, create the role with a real secret instead:
 
 ```sql
 CREATE ROLE stockroom_readonly LOGIN PASSWORD '<generate-a-strong-password>';
 GRANT CONNECT ON DATABASE railway TO stockroom_readonly;
 GRANT USAGE ON SCHEMA public TO stockroom_readonly;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO stockroom_readonly;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO stockroom_readonly;
+ALTER DEFAULT PRIVILEGES FOR ROLE <the role backend/'s DATABASE_URL connects as> IN SCHEMA public
+  GRANT SELECT ON TABLES TO stockroom_readonly;
 ```
 
 Run this once against the provisioned database (Railway's Postgres plugin
-exposes a `psql` console in its dashboard). Use `stockroom_readonly`'s
-connection string for `python-service`'s `DATABASE_URL` and the full
-read/write role's for `backend`'s.
+exposes a `psql` console in its dashboard) — the `ALTER DEFAULT PRIVILEGES
+FOR ROLE` clause matters: it must name the role `backend`'s migrations
+actually run as, or tables Prisma creates after this script runs (e.g. via
+a future migration) won't be visible to `stockroom_readonly`. Use
+`stockroom_readonly`'s connection string for `python-service`'s
+`DATABASE_URL` and the full read/write role's for `backend`'s.
 
 ## 2. Deploy the backend (Node API)
 

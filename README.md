@@ -21,6 +21,13 @@ Requires Node 20+, Python 3.11+, and PostgreSQL 15 (or `docker compose up db`).
 ```bash
 # 1. Database
 docker compose up -d db
+# docker compose runs db/init/01-create-readonly-role.sql automatically on
+# first init, creating the SELECT-only stockroom_readonly role the Python
+# service connects as (PRD §8). No Docker? Start Postgres yourself, create
+# a `stockroom` role/db matching backend/.env.example, then run that SQL
+# file as a superuser (creating a role needs CREATEROLE, which the plain
+# `stockroom` app role doesn't have):
+#   sudo -u postgres psql -d stockroom -f db/init/01-create-readonly-role.sql
 
 # 2. Backend
 cd backend
@@ -39,6 +46,7 @@ npm run dev             # http://localhost:5173
 cd python-service
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env   # DATABASE_URL here uses stockroom_readonly, not stockroom
 uvicorn app.main:app --reload --port 8000
 ```
 

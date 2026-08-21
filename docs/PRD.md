@@ -1,6 +1,6 @@
 # StockRoom — Product Requirements Document
 
-**Status:** Draft v0.1 · **Owner:** Jeraldo Alday · **Last updated:** 2026-08-14
+**Status:** v1.0 — MVP complete · **Owner:** Jeraldo Alday · **Last updated:** 2026-08-21
 
 ## 1. Problem
 
@@ -64,20 +64,24 @@ by `organizationId` at the middleware layer, never trusted from the client.
 
 ## 6. Functional requirements — MVP
 
-| # | Requirement | Priority |
-|---|---|---|
-| F1 | Email/password signup creates a new Organization + Owner user | P0 |
-| F2 | JWT auth, role-based access (OWNER vs STAFF) | P0 |
-| F3 | CRUD: Products, Categories, Locations, Suppliers, Customers | P0 |
-| F4 | Stock levels per product per location, auto-derived from movements | P0 |
-| F5 | Manual stock adjustment with required reason code | P0 |
-| F6 | Purchase orders: draft → ordered → received (partial receiving allowed) | P0 |
-| F7 | Sales orders: draft → fulfilled (decrements stock, blocks over-sell) | P0 |
-| F8 | Low-stock alert list (qty ≤ reorder point) | P0 |
-| F9 | Dashboard: total stock value, low-stock count, recent movements | P0 |
-| F10 | CSV import (products) and CSV export (products, stock, movements) | P1 |
-| F11 | Basic sales/stock report (Python service) with 7/30-day trend | P1 |
-| F12 | Simple reorder-quantity suggestion (moving-average demand) | P2 |
+| # | Requirement | Priority | Status |
+|---|---|---|---|
+| F1 | Email/password signup creates a new Organization + Owner user | P0 | Shipped (day 1) |
+| F2 | JWT auth, role-based access (OWNER vs STAFF) | P0 | Shipped (day 1, hardened day 13) |
+| F3 | CRUD: Products, Categories, Locations, Suppliers, Customers | P0 | Shipped (days 1-2) |
+| F4 | Stock levels per product per location, auto-derived from movements | P0 | Shipped (day 3) |
+| F5 | Manual stock adjustment with required reason code | P0 | Shipped (day 3) |
+| F6 | Purchase orders: draft → ordered → received (partial receiving allowed) | P0 | Shipped (day 4) |
+| F7 | Sales orders: draft → fulfilled (decrements stock, blocks over-sell) | P0 | Shipped (day 5) |
+| F8 | Low-stock alert list (qty ≤ reorder point) | P0 | Shipped (day 6) |
+| F9 | Dashboard: total stock value, low-stock count, recent movements, top movers | P0 | Shipped (day 6, top movers day 14) |
+| F10 | CSV import (products) and CSV export (products, stock, movements) | P1 | Shipped (day 10) |
+| F11 | Basic sales/stock report (Python service) with 7/30-day trend | P1 | Shipped (day 11) |
+| F12 | Simple reorder-quantity suggestion (moving-average demand) | P2 | Shipped (day 12) |
+
+All twelve are implemented end to end (API, UI, and tests). "Top movers"
+appears in section 3, goal 5 but was missing from the F9 row above until
+day 14; the row now reflects what F9 was always meant to include.
 
 ## 7. Non-functional requirements
 
@@ -152,6 +156,39 @@ session updates `docs/PROGRESS.md` with what shipped and what's next.
 ## 12. Open questions
 
 - Payment processing / billing provider (Stripe likely) — deferred to v2.
-- Hosting target (Railway/Render/Fly.io for MVP demo) — decide by day 12.
+- Hosting target (Railway/Render/Fly.io for MVP demo) — **still open.**
+  `docs/DEPLOYMENT.md` is written to be host-agnostic (env vars, deploy
+  order, health checks, and the limitations that bite when you scale past
+  one instance), so picking a host is now a decision rather than a
+  prerequisite.
 - Whether STAFF role needs per-location scoping — revisit after first
-  design partner feedback.
+  design partner feedback. Unchanged: no design partner yet, so there is
+  nothing new to decide on.
+
+## 13. v1 sign-off (day 14)
+
+The MVP scope in section 6 is complete. Signing off on it means being
+explicit about what "complete" does *not* cover, since these are the things
+a first paying customer will meet:
+
+- **No transactional email**, therefore no password reset and no invite
+  links. Adding a staff member is an Owner setting a temporary password and
+  telling them. This is the single largest gap for a real customer and is
+  the first thing v1.1 should address, because everything else in the
+  account lifecycle depends on it.
+- **Refresh tokens cannot be revoked.** Signing out clears the browser and
+  nothing else; a stolen token is valid for its full 7 days. Fixing it needs
+  server-side token state.
+- **Rate limiting is per-process**, so it weakens as soon as there is more
+  than one API instance.
+- **Revenue is only attributed to sales made through a sales order.** A SALE
+  recorded directly on the stock movements screen has no line price to read,
+  so it contributes units but not revenue to the trend report. This is a
+  data model gap, not a query bug: the fix is capturing a price on the
+  movement itself.
+- **Dashboard aggregates are computed in application code**, not SQL. Within
+  the 10k SKU target in section 7; a blocker beyond it.
+
+None of these change the answer to the question v1 was built to settle —
+whether a small shop will run its stock on this instead of a spreadsheet.
+They are what to build once someone says yes.

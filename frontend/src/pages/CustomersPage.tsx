@@ -4,6 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
 import { createCustomer, deleteCustomer, fetchCustomers } from "../api/customers";
 import { isApiError } from "../api/errors";
+import { ConfirmDialog, useConfirmation } from "../components/ConfirmDialog";
+import type { Customer } from "../api/types";
 
 export function CustomersPage() {
   const queryClient = useQueryClient();
@@ -27,6 +29,8 @@ export function CustomersPage() {
       setFormError(isApiError(err) ? err.response?.data?.error ?? "Could not create customer" : "Could not create customer");
     },
   });
+
+  const pendingDelete = useConfirmation<Customer>();
 
   const deleteMutation = useMutation({
     mutationFn: deleteCustomer,
@@ -130,7 +134,10 @@ export function CustomersPage() {
                 <td className="px-4 py-2 text-right">
                   <button
                     type="button"
-                    onClick={() => deleteMutation.mutate(customer.id)}
+                    onClick={() => {
+                      setRowError(null);
+                      pendingDelete.request(customer);
+                    }}
                     className="text-xs text-red-600 hover:underline"
                   >
                     Delete
@@ -141,6 +148,21 @@ export function CustomersPage() {
           </tbody>
         </table>
       </div>
+
+      <ConfirmDialog
+        open={pendingDelete.isOpen}
+        title="Delete this customer?"
+        description={
+          <>
+            <strong>{pendingDelete.target?.name}</strong> will be removed permanently. Customers
+            with sales order history can't be deleted.
+          </>
+        }
+        confirmLabel="Delete customer"
+        busy={deleteMutation.isPending}
+        onCancel={pendingDelete.cancel}
+        onConfirm={() => pendingDelete.confirm((customer) => deleteMutation.mutate(customer.id))}
+      />
     </AppShell>
   );
 }

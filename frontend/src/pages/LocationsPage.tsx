@@ -4,6 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
 import { createLocation, deleteLocation, fetchLocations, updateLocation } from "../api/locations";
 import { isApiError } from "../api/errors";
+import { ConfirmDialog, useConfirmation } from "../components/ConfirmDialog";
+import type { Location } from "../api/types";
 
 export function LocationsPage() {
   const queryClient = useQueryClient();
@@ -12,6 +14,7 @@ export function LocationsPage() {
   const [rowError, setRowError] = useState<string | null>(null);
 
   const locationsQuery = useQuery({ queryKey: ["locations"], queryFn: fetchLocations });
+  const pendingDelete = useConfirmation<Location>();
 
   const createMutation = useMutation({
     mutationFn: createLocation,
@@ -139,7 +142,10 @@ export function LocationsPage() {
                 <td className="px-4 py-2 text-right">
                   <button
                     type="button"
-                    onClick={() => deleteMutation.mutate(location.id)}
+                    onClick={() => {
+                      setRowError(null);
+                      pendingDelete.request(location);
+                    }}
                     className="text-xs text-red-600 hover:underline"
                   >
                     Delete
@@ -150,6 +156,21 @@ export function LocationsPage() {
           </tbody>
         </table>
       </div>
+
+      <ConfirmDialog
+        open={pendingDelete.isOpen}
+        title="Delete this location?"
+        description={
+          <>
+            <strong>{pendingDelete.target?.name}</strong> will be removed permanently. Locations
+            that still hold stock, or that are set as the default, can't be deleted.
+          </>
+        }
+        confirmLabel="Delete location"
+        busy={deleteMutation.isPending}
+        onCancel={pendingDelete.cancel}
+        onConfirm={() => pendingDelete.confirm((location) => deleteMutation.mutate(location.id))}
+      />
     </AppShell>
   );
 }

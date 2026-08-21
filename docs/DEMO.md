@@ -114,8 +114,11 @@ Go to **Reports**. Everything here is computed by the FastAPI service
 reading the same database, proxied through the Node API — the browser never
 talks to it directly.
 
-- **7 / 30-day trend** — units sold vs received per day. The weekly rhythm
-  is visible: weekends materially heavier than midweek.
+- **7 / 30-day trend** — units sold vs received per day, with revenue. Over
+  30 days: 3,377 units and $12,868.82. The weekly rhythm is visible —
+  weekends materially heavier than midweek. Every seeded sale carries the
+  price it went out at, which is what makes the revenue line real rather
+  than flat zero.
 - **Reorder suggestions** — the four low-stock products, ranked by how soon
   they run out, with a suggested quantity from trailing average daily
   demand over a 14-day coverage target, floored at the product's own

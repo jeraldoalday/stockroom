@@ -206,6 +206,27 @@ describe("seedDemoData", () => {
     }
   });
 
+  // The trend report reads revenue from the movement's own price. Without
+  // prices on the seeded sales, the demo's chart plots units against a flat
+  // zero revenue line — the exact gap that column was added to close.
+  it("prices every seeded sale, so the trend report has revenue to show", async () => {
+    const summary = await seedDemoData(client, { now: NOW, days: 30 });
+    const movements = await client.stockMovement.findMany({
+      where: { organizationId: summary.organizationId },
+    });
+
+    const sales = movements.filter((movement) => movement.type === "SALE");
+    expect(sales.length).toBeGreaterThan(0);
+    for (const sale of sales) {
+      expect(sale.unitPriceCents as number).toBeGreaterThan(0);
+    }
+
+    // ...and nothing else carries a price, which the API would reject.
+    for (const other of movements.filter((movement) => movement.type !== "SALE")) {
+      expect(other.unitPriceCents ?? null).toBeNull();
+    }
+  });
+
   it("leaves no inventory row negative", async () => {
     const summary = await seedDemoData(client, { now: NOW, days: 30 });
     const inventory = await client.inventoryItem.findMany({

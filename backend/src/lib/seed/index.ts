@@ -211,6 +211,7 @@ export async function seedDemoData(client: SeedClient, options: SeedOptions = {}
   // through the API, because the whole point is a *backdated* history the
   // trend and moving-average reports can chew on.
   for (const movement of history.movements) {
+    const product = productBySku(movement.sku);
     await client.stockMovement.create({
       data: {
         organizationId,
@@ -218,6 +219,12 @@ export async function seedDemoData(client: SeedClient, options: SeedOptions = {}
         locationId: locationsByName.get(movement.locationName),
         type: movement.type,
         quantity: movement.quantity,
+        // Sales carry the price they went out at, so the trend report has
+        // revenue to show. Without this the demo's chart plots units
+        // against a flat zero revenue line — which is exactly the gap the
+        // movement price column was added to close, and it would be an odd
+        // thing to leave visible in the demo data.
+        unitPriceCents: movement.type === "SALE" ? product.priceCents : null,
         reason: movement.reason ?? null,
         // Receiving is the storekeeper's job; adjustments and the daily
         // sales ring-up land on whoever is on the floor.

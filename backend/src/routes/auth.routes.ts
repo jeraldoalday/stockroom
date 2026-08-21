@@ -10,8 +10,27 @@ import {
   verifyPassword,
   verifyRefreshToken,
 } from "../lib/auth";
+import { rateLimit } from "../lib/rateLimit";
 
 const router = Router();
+
+// Credential endpoints are the only unauthenticated writes in the product,
+// so they're the only place an attacker can spend our CPU for free. Keyed
+// by IP *and* email so one noisy office NAT can't lock out everyone behind
+// it, while a credential-stuffing run against many accounts from one host
+// still gets throttled by the shared IP portion of the key.
+const loginLimiter = rateLimit({
+  limit: 10,
+  windowMs: 15 * 60 * 1000,
+  keyGenerator: (req) => `${req.ip}:${String(req.body?.email ?? "").toLowerCase()}`,
+  message: "Too many sign-in attempts. Please try again in a few minutes.",
+});
+
+const signupLimiter = rateLimit({
+  limit: 5,
+  windowMs: 60 * 60 * 1000,
+  message: "Too many accounts created from this address. Please try again later.",
+});
 
 const signupSchema = z.object({
   organizationName: z.string().min(2).max(120),
@@ -22,6 +41,7 @@ const signupSchema = z.object({
 
 router.post(
   "/signup",
+  signupLimiter,
   asyncHandler(async (req, res) => {
     const body = signupSchema.parse(req.body);
     const email = body.email.toLowerCase();
@@ -82,6 +102,7 @@ const loginSchema = z.object({
 
 router.post(
   "/login",
+  loginLimiter,
   asyncHandler(async (req, res) => {
     const body = loginSchema.parse(req.body);
     const email = body.email.toLowerCase();
@@ -102,6 +123,10 @@ router.post(
       role: user.role,
     });
     const refreshToken = signRefreshToken({ sub: user.id });
+
+    // A user who simply mistyped their password a few times shouldn't stay
+    // throttled once they get it right.
+    loginLimiter.limiter.reset(loginLimiter.keyFor(req));
 
     res.json({
       accessToken,

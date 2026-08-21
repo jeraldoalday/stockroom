@@ -9,6 +9,7 @@ import {
   SEED_PRODUCTS,
   createRandom,
   planHistory,
+  runningLowSkus,
   seedDemoData,
 } from "../lib/seed";
 import type { SeedClient } from "../lib/seed";
@@ -93,6 +94,51 @@ describe("planHistory", () => {
     for (const adjustment of adjustments) {
       expect(adjustment.reason).toBeTruthy();
     }
+  });
+
+  // The low-stock panel (F8) and the reorder-quantity report (F12) are two
+  // of the things this data exists to demonstrate, and both show nothing at
+  // all unless some product is actually at or below its reorder point. An
+  // earlier version of the simulation restocked everything on schedule and
+  // finished with an empty low-stock list, which made those screens look
+  // broken in a demo.
+  it("leaves some products at or below their reorder point", () => {
+    const { quantities } = planHistory({ days: 60 });
+
+    const totalBySku = new Map<string, number>();
+    for (const [key, quantity] of quantities) {
+      const [sku] = key.split("::");
+      totalBySku.set(sku, (totalBySku.get(sku) ?? 0) + quantity);
+    }
+
+    const low = SEED_PRODUCTS.filter(
+      (product) => (totalBySku.get(product.sku) ?? 0) <= product.reorderPoint
+    );
+
+    expect(low.length).toBeGreaterThanOrEqual(3);
+    // Stock on hand is summed across locations, so a product can only read
+    // as low if every location is low — including the back room.
+    for (const product of low) {
+      expect(runningLowSkus()).toContain(product.sku);
+    }
+  });
+
+  it("leaves most products comfortably stocked", () => {
+    const { quantities } = planHistory({ days: 60 });
+
+    const totalBySku = new Map<string, number>();
+    for (const [key, quantity] of quantities) {
+      const [sku] = key.split("::");
+      totalBySku.set(sku, (totalBySku.get(sku) ?? 0) + quantity);
+    }
+
+    const healthy = SEED_PRODUCTS.filter(
+      (product) => (totalBySku.get(product.sku) ?? 0) > product.reorderPoint
+    );
+
+    // A demo where everything is low is as uninformative as one where
+    // nothing is.
+    expect(healthy.length).toBeGreaterThan(SEED_PRODUCTS.length / 2);
   });
 
   it("produces sales across a range of days, not all on one", () => {

@@ -49,6 +49,22 @@ export const DEFAULT_HISTORY_DAYS = 60;
 const SELLING_LOCATION = "Storefront";
 const BACKUP_LOCATION = "Back Room";
 
+/**
+ * SKUs deliberately allowed to run down by the end of the window.
+ *
+ * Without this the simulation restocks everything on schedule and finishes
+ * with no product at or below its reorder point — which leaves the
+ * dashboard's low-stock panel (F8) and the reorder-quantity report (F12)
+ * showing nothing at all. Those are two of the features the demo data
+ * exists to demonstrate, so the data has to contain the situation they
+ * describe. They're chosen across three categories so the low-stock list
+ * doesn't look like one supplier having a bad week.
+ */
+const RUNNING_LOW_SKUS = new Set(["NG-2004", "NG-4001", "NG-6003", "NG-5004"]);
+
+/** How many days before "now" the products above stop being replenished. */
+const RUN_DOWN_DAYS = 10;
+
 function stockKey(sku: string, locationName: string) {
   return `${sku}::${locationName}`;
 }
@@ -108,17 +124,25 @@ export function planHistory(options: { days?: number; seed?: number } = {}): Pla
     adjust(product.sku, SELLING_LOCATION, opening);
 
     // A reserve in the back room, so transfers and multi-location stock
-    // views have something to show.
-    const reserve = product.reorderQty;
-    movements.push({
-      sku: product.sku,
-      locationName: BACKUP_LOCATION,
-      type: "RECEIVE",
-      quantity: reserve,
-      reason: "Opening stock",
-      daysAgo: days + 1,
-    });
-    adjust(product.sku, BACKUP_LOCATION, reserve);
+    // views have something to show. The products being run down get none:
+    // stock on hand is summed across locations, so a back-room reserve
+    // would keep them above their reorder point no matter what the
+    // storefront does.
+    const reserve = RUNNING_LOW_SKUS.has(product.sku) ? 0 : product.reorderQty;
+    // No movement at all rather than a zero-quantity one: the API rejects
+    // a movement of zero outright ("quantity must not be zero"), and a row
+    // that records nothing happening has no place in an audit trail.
+    if (reserve > 0) {
+      movements.push({
+        sku: product.sku,
+        locationName: BACKUP_LOCATION,
+        type: "RECEIVE",
+        quantity: reserve,
+        reason: "Opening stock",
+        daysAgo: days + 1,
+      });
+      adjust(product.sku, BACKUP_LOCATION, reserve);
+    }
   }
 
   for (let daysAgo = days; daysAgo >= 1; daysAgo -= 1) {
@@ -129,7 +153,8 @@ export function planHistory(options: { days?: number; seed?: number } = {}): Pla
       // point — this is what the reorder-point data is *for*, and it keeps
       // the simulation from simply running every SKU down to zero.
       const onHand = quantityAt(product.sku, SELLING_LOCATION);
-      if (onHand <= product.reorderPoint && random() < 0.6) {
+      const replenishmentStopped = RUNNING_LOW_SKUS.has(product.sku) && daysAgo <= RUN_DOWN_DAYS;
+      if (onHand <= product.reorderPoint && !replenishmentStopped && random() < 0.6) {
         movements.push({
           sku: product.sku,
           locationName: SELLING_LOCATION,
@@ -189,6 +214,12 @@ export function planHistory(options: { days?: number; seed?: number } = {}): Pla
  * reproducible for a given clock. */
 export function dateDaysAgo(now: Date, daysAgo: number): Date {
   return new Date(now.getTime() - daysAgo * 24 * 60 * 60 * 1000);
+}
+
+/** Exported for the tests that assert the demo actually contains the
+ * low-stock situation the dashboard and reorder report are meant to show. */
+export function runningLowSkus(): string[] {
+  return [...RUNNING_LOW_SKUS];
 }
 
 export function productBySku(sku: string): SeedProduct {

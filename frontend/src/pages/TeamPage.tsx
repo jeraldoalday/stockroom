@@ -5,7 +5,8 @@ import { AppShell } from "../components/AppShell";
 import { useAuth } from "../context/AuthContext";
 import { fetchTeamMembers, inviteTeamMember, removeTeamMember, updateTeamMemberRole } from "../api/users";
 import { isApiError } from "../api/errors";
-import { ConfirmDialog, useConfirmation } from "../components/ConfirmDialog";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { useConfirmation } from "../components/useConfirmation";
 import type { TeamMember } from "../api/types";
 import type { UserRole } from "../api/types";
 

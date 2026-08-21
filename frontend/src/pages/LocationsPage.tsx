@@ -4,7 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
 import { createLocation, deleteLocation, fetchLocations, updateLocation } from "../api/locations";
 import { isApiError } from "../api/errors";
-import { ConfirmDialog, useConfirmation } from "../components/ConfirmDialog";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { useConfirmation } from "../components/useConfirmation";
 import type { Location } from "../api/types";
 
 export function LocationsPage() {

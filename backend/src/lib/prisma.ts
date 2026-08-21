@@ -1,7 +1,9 @@
 import { PrismaClient } from "@prisma/client";
 
 declare global {
-  // eslint-disable-next-line no-var
+  // `var` is the only declaration form that augments globalThis; `let` and
+  // `const` don't. ESLint's no-var doesn't flag ambient declarations, so
+  // this needs no suppression comment.
   var __prisma: PrismaClient | undefined;
 }
 

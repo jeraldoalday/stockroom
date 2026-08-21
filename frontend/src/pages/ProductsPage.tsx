@@ -12,7 +12,8 @@ import {
 } from "../api/products";
 import type { ImportProductsResult, ProductStatusFilter } from "../api/products";
 import { isApiError } from "../api/errors";
-import { ConfirmDialog, useConfirmation } from "../components/ConfirmDialog";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { useConfirmation } from "../components/useConfirmation";
 import type { Product } from "../api/types";
 
 const STATUS_TABS: { value: ProductStatusFilter; label: string }[] = [

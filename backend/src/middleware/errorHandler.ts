@@ -33,7 +33,8 @@ function translatePrismaError(err: Prisma.PrismaClientKnownRequestError): ApiErr
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+// Express identifies an error handler by its four-parameter signature, so
+// `_next` must stay in the list even though nothing calls it.
 export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction) {
   if (err instanceof ZodError) {
     return res.status(400).json({ error: "Validation failed", details: err.flatten() });

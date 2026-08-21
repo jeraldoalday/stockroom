@@ -2,7 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 import type { UserRole } from "@prisma/client";
 import { verifyAccessToken } from "../lib/auth";
 import { ApiError } from "../lib/errors";
-import { redactCostFields } from "../lib/rbac";
+import { redactForRole } from "../lib/rbac";
 
 // Augment Express's Request with the authenticated principal. Every
 // tenant-scoped query in the app reads req.auth.organizationId — the
@@ -35,12 +35,14 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
       role: payload.role,
     };
 
-    // Every JSON response sent for a STAFF principal has cost/margin fields
-    // stripped, regardless of which route produced it — see lib/rbac.ts.
-    if (payload.role === "STAFF") {
-      const originalJson = res.json.bind(res);
-      res.json = ((body: unknown) => originalJson(redactCostFields(body))) as Response["json"];
-    }
+    // Every authenticated JSON response is shaped in one place, regardless
+    // of which route produced it (see lib/rbac.ts): secret fields such as
+    // passwordHash are always stripped — they leak through Prisma relation
+    // includes without any route naming them — and cost/margin fields are
+    // additionally stripped for a STAFF principal.
+    const originalJson = res.json.bind(res);
+    const role = payload.role;
+    res.json = ((body: unknown) => originalJson(redactForRole(body, role))) as Response["json"];
 
     next();
   } catch {

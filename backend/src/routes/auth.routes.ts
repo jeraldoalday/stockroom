@@ -1,9 +1,12 @@
+import crypto from "crypto";
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { asyncHandler } from "../lib/asyncHandler";
 import { requireAuth } from "../middleware/auth";
 import { ApiError } from "../lib/errors";
+import { env } from "../lib/env";
+import { emailSender } from "../lib/email";
 import {
   hashPassword,
   signAccessToken,
@@ -168,6 +171,86 @@ router.patch(
 
     const passwordHash = await hashPassword(body.newPassword);
     await prisma.user.update({ where: { id: user.id }, data: { passwordHash } });
+
+    res.status(204).send();
+  })
+);
+
+const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+function hashResetToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+const forgotPasswordSchema = z.object({ email: z.string().email() });
+
+// Always responds 202 whether or not the email matches an account — telling
+// an anonymous caller "no such account" turns this into a user-enumeration
+// oracle, so the only observable difference is whether an email actually
+// goes out (and in dev, whether anything gets logged).
+router.post(
+  "/forgot-password",
+  asyncHandler(async (req, res) => {
+    const body = forgotPasswordSchema.parse(req.body);
+    const email = body.email.toLowerCase();
+
+    const user = await prisma.user.findFirst({ where: { email } });
+    if (user) {
+      const token = crypto.randomBytes(32).toString("hex");
+      await prisma.$transaction(async (tx) => {
+        // Superseding a stale link on every new request keeps at most one
+        // usable reset token per user, same reasoning as the invite flow's
+        // other password-lifecycle guards.
+        await tx.passwordResetToken.updateMany({
+          where: { userId: user.id, usedAt: null },
+          data: { usedAt: new Date() },
+        });
+        await tx.passwordResetToken.create({
+          data: {
+            userId: user.id,
+            tokenHash: hashResetToken(token),
+            expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS),
+          },
+        });
+      });
+
+      const resetUrl = `${env.corsOrigin}/reset-password?token=${token}`;
+      await emailSender.send({
+        to: user.email,
+        subject: "Reset your StockRoom password",
+        text: `Someone requested a password reset for this StockRoom account.\n\nReset it here (valid for 1 hour): ${resetUrl}\n\nIf you didn't request this, you can ignore this email.`,
+      });
+    }
+
+    res.status(202).json({ message: "If an account exists for that email, we've sent reset instructions." });
+  })
+);
+
+const resetPasswordSchema = z.object({
+  token: z.string().min(1),
+  newPassword: z.string().min(8).max(72),
+});
+
+router.post(
+  "/reset-password",
+  asyncHandler(async (req, res) => {
+    const body = resetPasswordSchema.parse(req.body);
+
+    const resetToken = await prisma.passwordResetToken.findUnique({
+      where: { tokenHash: hashResetToken(body.token) },
+    });
+    if (!resetToken || resetToken.usedAt || resetToken.expiresAt < new Date()) {
+      throw ApiError.badRequest("This reset link is invalid or has expired");
+    }
+
+    const passwordHash = await hashPassword(body.newPassword);
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: resetToken.userId }, data: { passwordHash } });
+      await tx.passwordResetToken.update({
+        where: { id: resetToken.id },
+        data: { usedAt: new Date() },
+      });
+    });
 
     res.status(204).send();
   })

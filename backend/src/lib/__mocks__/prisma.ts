@@ -75,6 +75,12 @@ class Table {
     return Promise.resolve({ ...row });
   }
 
+  updateMany({ where = {}, data }: { where?: Rec; data: Rec }) {
+    const matched = this.rows.filter((r) => matchesClause(r, where));
+    matched.forEach((row) => Object.assign(row, data));
+    return Promise.resolve({ count: matched.length });
+  }
+
   delete({ where }: { where: Rec }) {
     const index = this.rows.findIndex((r) => matchesClause(r, where));
     if (index === -1) throw new Error("Record to delete not found");
@@ -97,6 +103,7 @@ const tables = {
   purchaseOrderLine: new Table({ quantityReceived: 0 }),
   salesOrder: new Table({ status: "DRAFT" }),
   salesOrderLine: new Table(),
+  passwordResetToken: new Table({ usedAt: null }),
 };
 
 export const prisma = {

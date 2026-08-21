@@ -68,11 +68,31 @@ model User {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  stockMovements StockMovement[]
+  stockMovements      StockMovement[]
+  passwordResetTokens PasswordResetToken[]
 
   @@unique([email])
   @@index([organizationId])
   @@map("users")
+}
+
+// Forgot-password flow (§13 v1 sign-off deferred this pending an email
+// provider). No provider is configured anywhere in this stack yet, so
+// lib/email.ts ships a console-logging sender for local dev/demo — see the
+// comment there for what a real provider needs to replace. Only the
+// tokenHash is stored, never the raw token, so a DB read can't be turned
+// into a usable reset link.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@map("password_reset_tokens")
 }
 
 model Location {

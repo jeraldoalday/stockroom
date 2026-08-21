@@ -203,3 +203,60 @@ def test_reorder_suggestions_requires_internal_key(monkeypatch):
     )
     res = client.get("/reports/reorder-suggestions", params={"organization_id": "org_1"})
     assert res.status_code == 401
+
+
+def test_movements_export_includes_unit_price(monkeypatch):
+    """A SALE's price is part of what the owner reconciles takings against,
+    so the movements export carries it. Receipts and adjustments have no
+    price and come through blank rather than as a misleading zero."""
+    monkeypatch.setattr(
+        "app.routers.reports.fetch_movement_rows",
+        lambda conn, organization_id, since: [
+            {
+                "created_at": "2026-08-21T00:00:00Z",
+                "sku": "WIDGET-1",
+                "product_name": "Widget",
+                "location": "Main",
+                "type": "SALE",
+                "quantity": -3,
+                "unit_price_cents": 1999,
+                "reason": None,
+            },
+            {
+                "created_at": "2026-08-20T00:00:00Z",
+                "sku": "WIDGET-1",
+                "product_name": "Widget",
+                "location": "Main",
+                "type": "RECEIVE",
+                "quantity": 10,
+                "unit_price_cents": None,
+                "reason": None,
+            },
+        ],
+    )
+    res = client.get("/export/movements", params={"organization_id": "org_1"}, headers=HEADERS)
+    assert res.status_code == 200
+    assert "unit_price_cents" in res.text
+    assert "1999" in res.text
+
+    sale_row = next(line for line in res.text.splitlines() if "SALE" in line)
+    receive_row = next(line for line in res.text.splitlines() if "RECEIVE" in line)
+    assert "1999" in sale_row
+    # Blank, not 0.0 — "we didn't charge anything" and "this isn't a sale"
+    # are different statements and the CSV shouldn't conflate them.
+    assert ",," in receive_row
+
+
+def test_trend_prefers_the_movements_own_price_over_the_order_line():
+    """Guards the COALESCE argument order in the trend query.
+
+    This asserts on SQL text rather than on results, because the query needs
+    a live Postgres to execute. It is deliberately narrow: the one thing that
+    silently breaks here is the precedence, since swapping the arguments
+    still runs, still returns numbers, and quietly reports the ordered price
+    instead of the price actually charged.
+    """
+    from app.services.reports import _TREND_SQL
+
+    sql = str(_TREND_SQL)
+    assert 'COALESCE(sm."unitPriceCents", sol."unitPriceCents", 0)' in sql

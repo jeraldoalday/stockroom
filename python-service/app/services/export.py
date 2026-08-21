@@ -64,10 +64,16 @@ _MOVEMENTS_SQL = text(
         l."name" AS location,
         sm."type" AS type,
         sm."quantity" AS quantity,
+        -- Same precedence as the trend report: the movement's own price
+        -- first, the sales order line second for rows written before
+        -- stock_movements carried a price at all.
+        COALESCE(sm."unitPriceCents", sol."unitPriceCents") AS unit_price_cents,
         sm."reason" AS reason
     FROM "stock_movements" sm
     JOIN "products" p ON p."id" = sm."productId"
     JOIN "locations" l ON l."id" = sm."locationId"
+    LEFT JOIN "sales_order_lines" sol
+        ON sol."salesOrderId" = sm."salesOrderId" AND sol."productId" = sm."productId"
     WHERE sm."organizationId" = :organization_id
       AND sm."createdAt" >= :since
     ORDER BY sm."createdAt" DESC

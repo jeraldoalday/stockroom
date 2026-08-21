@@ -7,14 +7,14 @@ import { requireAuth } from "../middleware/auth";
 import { ApiError } from "../lib/errors";
 import { env } from "../lib/env";
 import { emailSender } from "../lib/email";
-import {
-  hashPassword,
-  signAccessToken,
-  signRefreshToken,
-  verifyPassword,
-  verifyRefreshToken,
-} from "../lib/auth";
+import { hashPassword, signAccessToken, verifyPassword } from "../lib/auth";
 import { rateLimit } from "../lib/rateLimit";
+import {
+  issueRefreshToken,
+  revokeAllForUser,
+  revokeSession,
+  rotateRefreshToken,
+} from "../lib/refreshTokens";
 
 const router = Router();
 
@@ -111,7 +111,7 @@ router.post(
       organizationId: organization.id,
       role: user.role,
     });
-    const refreshToken = signRefreshToken({ sub: user.id });
+    const { token: refreshToken } = await issueRefreshToken(prisma, user.id);
 
     res.status(201).json({
       accessToken,
@@ -149,7 +149,9 @@ router.post(
       organizationId: user.organizationId,
       role: user.role,
     });
-    const refreshToken = signRefreshToken({ sub: user.id });
+    // A fresh login starts a new rotation family, so signing out on one
+    // device doesn't end the session on another.
+    const { token: refreshToken } = await issueRefreshToken(prisma, user.id);
 
     // A user who simply mistyped their password a few times shouldn't stay
     // throttled once they get it right.
@@ -165,18 +167,20 @@ router.post(
 
 const refreshSchema = z.object({ refreshToken: z.string() });
 
+// Refreshing now rotates: the presented token is revoked and a new one is
+// returned alongside the access token, so a token is only ever good once.
+// Callers must persist the returned refreshToken — the old one stops
+// working the moment this succeeds.
 router.post(
   "/refresh",
   asyncHandler(async (req, res) => {
     const body = refreshSchema.parse(req.body);
-    let payload: { sub: string };
-    try {
-      payload = verifyRefreshToken(body.refreshToken);
-    } catch {
-      throw ApiError.unauthorized("Invalid or expired refresh token");
-    }
+    const { userId, token: refreshToken } = await rotateRefreshToken(body.refreshToken);
 
-    const user = await prisma.user.findUnique({ where: { id: payload.sub } });
+    // Role and organization are read fresh rather than taken from the
+    // token, so a promotion or demotion takes effect on the next refresh
+    // instead of waiting out the old access token.
+    const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
       throw ApiError.unauthorized("User no longer exists");
     }
@@ -187,7 +191,23 @@ router.post(
       role: user.role,
     });
 
-    res.json({ accessToken });
+    res.json({ accessToken, refreshToken });
+  })
+);
+
+const logoutSchema = z.object({ refreshToken: z.string() });
+
+// Signing out ends the session server-side instead of only clearing the
+// browser. Unauthenticated on purpose: the access token has usually expired
+// by the time a user gets around to signing out, and holding the refresh
+// token is itself the proof. Always 204, never reporting whether the token
+// was real, so this can't be used to probe token validity.
+router.post(
+  "/logout",
+  asyncHandler(async (req, res) => {
+    const body = logoutSchema.parse(req.body);
+    await revokeSession(body.refreshToken);
+    res.status(204).send();
   })
 );
 
@@ -218,7 +238,15 @@ router.patch(
     }
 
     const passwordHash = await hashPassword(body.newPassword);
-    await prisma.user.update({ where: { id: user.id }, data: { passwordHash } });
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: user.id }, data: { passwordHash } });
+      // Changing a password ends every session, including this one. The
+      // reason anyone changes a password under suspicion is to stop whoever
+      // else has access — leaving their refresh token working for another
+      // seven days would defeat the entire exercise. The client re-signs in
+      // with the new password.
+      await revokeAllForUser(tx, user.id);
+    });
 
     res.status(204).send();
   })
@@ -300,6 +328,9 @@ router.post(
         where: { id: resetToken.id },
         data: { usedAt: new Date() },
       });
+      // A reset is the response to "someone else may have my account", so
+      // it has to end that someone else's sessions too.
+      await revokeAllForUser(tx, resetToken.userId);
     });
 
     res.status(204).send();

@@ -141,6 +141,7 @@ const tables = {
   salesOrder: new Table({ status: "DRAFT" }),
   salesOrderLine: new Table(),
   passwordResetToken: new Table({ usedAt: null }),
+  refreshToken: new Table({ revokedAt: null, replacedById: null }),
 };
 
 // `__reset` hangs off the mocked client itself rather than being a separate

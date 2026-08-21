@@ -70,6 +70,7 @@ model User {
 
   stockMovements      StockMovement[]
   passwordResetTokens PasswordResetToken[]
+  refreshTokens       RefreshToken[]
 
   @@unique([email])
   @@index([organizationId])
@@ -93,6 +94,39 @@ model PasswordResetToken {
 
   @@index([userId])
   @@map("password_reset_tokens")
+}
+
+// Refresh tokens are recorded server-side so a session can actually be
+// ended. Before this, signing out cleared the browser and nothing else: the
+// refresh token stayed valid for its full 7 days, and changing or resetting
+// a password did not lock out whoever else was holding one — which made
+// "reset your password" useless as a response to a compromised account.
+//
+// Only the hash is stored, never the token, so a database read can't be
+// replayed as a session (same rule as PasswordResetToken).
+//
+// `familyId` groups every token descended from one login. Rotation issues a
+// new token and revokes the old one, so a token presented twice means the
+// holder is replaying one that was already exchanged — either a stolen copy
+// or the legitimate client racing itself. There is no way to tell which, so
+// the whole family is revoked and everyone re-authenticates. That is the
+// standard refresh-token-reuse response (OAuth 2.0 BCP section 4.14.2).
+model RefreshToken {
+  id             String    @id @default(cuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id])
+  tokenHash      String    @unique
+  familyId       String
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  // Set when this token is rotated, so a replay can be traced to the token
+  // that superseded it when reading the table by hand.
+  replacedById   String?
+  createdAt      DateTime  @default(now())
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
 }
 
 model Location {

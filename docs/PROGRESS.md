@@ -484,3 +484,207 @@ Locations/Suppliers/Customers.
   reintroduce this exact gap — worth revisiting only if a future field
   needs role-based visibility with more nuance than "Owner-only," which
   nothing in the current PRD calls for.
+
+## Day 14 — 2026-08-21
+
+**Planned:** Polish, demo script, deployment docs, PRD v1 sign-off — plus
+the Day 13 leftovers (seed data, docs) and the smaller items carried
+forward since Day 7 and Day 9.
+
+The session opened by reading the code rather than the plan, which turned
+out to be the right order: three of the things found were bugs nobody had
+filed, and one of them had been quietly disabling a chunk of the test suite
+for thirteen days.
+
+**Shipped — bug fixes:**
+
+- **The in-memory Prisma mock was never actually resetting between tests.**
+  Every route test declares `beforeEach(() => __resetPrismaMock())` and
+  none of them were clearing anything. `jest.mock("../lib/prisma")` makes
+  that module id resolve to `lib/__mocks__/prisma`, but the tests imported
+  the reset helper from `"../lib/__mocks__/prisma"` — a *different* module
+  id, so Jest executed the mock a second time under its own registry entry,
+  with its own `tables`. The reset cleared a store nobody read. It failed
+  silently: rows accumulated across each file, and the suite had grown
+  around it, handing every test unique emails (`owner2@shop.test`,
+  `owner3@shop.test`, …) and SKUs so the leftovers never collided. Found by
+  writing a test that signed up twice with the same email and getting a 409.
+  The reset now hangs off the mocked client (`prisma.__reset()`), so there
+  is no second module to import by mistake, and the helper throws when the
+  client has no `__reset` — turning "you forgot `jest.mock`" from a silent
+  no-op into a hard failure.
+- **`GET /api/stock-movements` was returning every colleague's bcrypt
+  hash.** The audit trail embeds the movement's actor and did it with
+  `include: { actor: true }` — the whole User row. Any authenticated member
+  of an org could read the password hash of everyone who had ever touched
+  stock, from a list they were entitled to see. Nothing in the route named
+  the field; it arrived purely as a side effect of the relation include,
+  which is exactly why it survived thirteen days of review. Fixed at both
+  layers: the include is narrowed to a `PUBLIC_USER_SELECT`, so the hash is
+  never read out of the database, *and* `lib/rbac.ts` grew a
+  `SECRET_FIELD_KEYS` set applied to every authenticated response, not just
+  STAFF ones. Either fix alone leaves the same trap set for the next route
+  that embeds a user.
+- **The frontend threw away its refresh token,** so every session died
+  after exactly 15 minutes (`JWT_ACCESS_TTL`). `POST /api/auth/refresh` has
+  existed since Day 1 and was never called; `setSession` stored only the
+  access token. Nothing retried and nothing signed the user out, so the app
+  just sat there showing "Failed to load products." with no hint that
+  signing out and back in was the fix. Any session long enough to matter —
+  a stock count, a receiving run — hit this. Now: refresh token stored, a
+  response interceptor refreshes and replays the failed request, requests
+  marked once-retried so a genuine 401 doesn't loop, login/signup/refresh
+  excluded (a 401 there means "wrong password"), and simultaneous 401s
+  share one refresh promise so a dashboard's parallel queries don't race to
+  write a token that's already superseded.
+- **Locations became permanently undeletable once used.** An
+  `InventoryItem` row is created the first time a product/location pair is
+  touched and never removed — it only drops to zero. The guard counted rows
+  rather than stock, so a location emptied of everything still refused to
+  delete, behind a message ("has inventory records") that named an internal
+  table. Now it refuses only on non-zero quantity and says what to do about
+  it, then two guards behind that: stock movement history (a real FK, same
+  rule Suppliers and Customers already state clearly) and — newly — sales
+  orders, since `SalesOrder.locationId` is a plain column with no relation
+  declared, so nothing at the database level was preventing a delete from
+  orphaning them.
+- **Prisma constraint errors surfaced as 500s.** Routes check "is this SKU
+  taken?" before writing, but check-then-write isn't atomic; the loser of a
+  race hit the unique index and got an opaque 500 where 409 was the right
+  answer. P2002/P2003/P2025 are now translated, echoing the constraint's
+  target column where the connector provides it.
+- **python-service couldn't be imported below Python 3.10.**
+  `require_internal_caller` annotated its header as `str | None`. The module
+  has `from __future__ import annotations`, which makes that *look*
+  version-safe — but FastAPI resolves parameter annotations at runtime to
+  build the request model, so it raises at import time and takes the whole
+  suite down during collection, with an error pointing nowhere near the
+  cause. CI pins 3.11 so it was invisible there; locally, pytest could not
+  collect a single test until this was fixed.
+
+**Shipped — features:**
+
+- **Top movers on the dashboard (F9).** PRD section 3, goal 5 has always
+  listed it alongside stock value and low stock; it was never built, which
+  left the dashboard reporting only problems and never what was working.
+  `GET /api/dashboard/top-movers?days=30&limit=5`, plus the panel. Units
+  are valued at the product's *current* list price and the field is named
+  `estimatedValueCents`, not revenue — the price actually charged lives on
+  the sales order line, the trend report handles that properly, and a
+  dashboard approximation should say so rather than quietly disagree with
+  the Reports screen. Archived products still appear, flagged, because they
+  did sell in the window.
+- **Archived products are visible and restorable.** `DELETE /api/products/
+  :id` has always been a soft delete, but nothing could read that state
+  back and nothing ever set `isActive` to true — so a mis-click removed a
+  product permanently *and* left its SKU taken, recoverable only by hand in
+  the database. Adds `?status=active|archived|all`, a restore route, and
+  Active/Archived/All tabs with per-row Archive and Restore. Archiving is
+  blocked while the product is on an open order: receiving against one
+  would post movements for a product the catalogue says is gone, and it
+  would *succeed*, which is worse than failing.
+- **Confirmation dialogs for destructive actions** (open since Day 7) on
+  Locations, Suppliers, Customers, Team and the new product archive. Not
+  `window.confirm`: it closes before the request is sent, and several of
+  these deletes are legitimately refused by the API with messages that are
+  the most useful thing the user can see. The dialog stays up while the
+  mutation runs.
+- **Pagination and filters on the list screens** (open since Day 9). Every
+  list endpoint has returned `{ items, total, page, pageSize }` since Day 2
+  and the frontend ignored all of it, so the stock movement history showed
+  only its 25 most recent rows with no indication the rest existed — an
+  audit trail that looks like it silently drops history. Adds a shared
+  `Pagination` control (Stock Movements, Inventory, Suppliers, Customers),
+  the product/location/type filters the movements API already accepted, and
+  a "Recorded by" column, now safe to render.
+- **Rate limiting on the credential endpoints.** `/api/auth/login` was an
+  unmetered password oracle. bcrypt doesn't help: the attacker pays nothing
+  per guess and we pay the CPU, which makes an unthrottled login a cheap
+  denial-of-service target as well as a credential one. 10 attempts per 15
+  minutes keyed by IP *and* email — IP alone would let one attacker lock
+  out everyone behind a shared office NAT — cleared on success, and
+  deliberately still in force for the correct password, since throttling an
+  oracle is pointless if it lifts the moment the attacker guesses right.
+
+**Shipped — Day 13/14 deliverables:**
+
+- **Seed data (`npm run seed`).** Northside Grocery: 3 locations, 24
+  products, 4 suppliers, 5 customers, ~1,620 backdated movements, orders in
+  every status. Built as a deterministic simulation rather than a fixture,
+  because the reports it feeds are only interesting if the history holds
+  together — weekday demand curves and noise give the trend report a shape
+  and the moving average something to average, restocking at the reorder
+  point exercises that data instead of running every SKU to zero, and
+  occasional shrinkage puts adjustments in the audit trail. Generation
+  lives in `src/lib/seed` behind a structurally-typed client so the whole
+  thing is testable against the in-memory client, which matters because the
+  seed writes movements and inventory totals *separately* — the 18 tests
+  prove the two still agree. It is idempotent and scoped to the demo org by
+  name, tested against a database holding an unrelated organization.
+- **`docs/DEPLOYMENT.md`** — env vars across all three services, deploy
+  order, what each health endpoint actually proves, and a long section on
+  what is not production-ready, since each of those items silently changes
+  behaviour when the deployment grows.
+- **`backend/prisma/sql/readonly_role.sql`** — the SELECT-only database
+  role PRD section 8 has specified since Day 1 and which nothing enforced;
+  both services have been pointed at the same credentials in every
+  `.env.example`. It matters most for the Python service, whose queries are
+  the one place in the system where the tenant filter is hand-written
+  rather than applied by middleware.
+- **`docs/DEMO.md`** — a 10-minute walkthrough quoting real figures
+  ($2,686.00 of stock, 1,622 movements, Butter Croissant at 281 units),
+  which is only possible because the seed is deterministic. Ends with a
+  "known gaps, if asked" section.
+- **PRD signed off at v1.0** with each requirement marked shipped and an
+  explicit list of what "complete" doesn't cover.
+
+**Shipped — maintenance:**
+
+- **`npm run lint` now lints something.** Both packages have shipped a
+  `lint` script since Day 1 with no ESLint dependency and no config, so it
+  failed with "command not found" — meaning the `eslint-disable-next-line`
+  comments in the backend have never suppressed anything. ESLint 9 flat
+  configs in both packages, clean at `--max-warnings 0`, wired into CI
+  along with a `typecheck` that finally covers `prisma/seed.ts` (the build
+  tsconfig's `rootDir` is `src`, so it was checked by nothing).
+- The in-memory Prisma mock gained filter operators (`in`, `notIn`, `not`,
+  comparisons), `deleteMany` and `updateMany`. It now *throws* on an
+  operator it doesn't implement rather than ignoring it — an ignored
+  operator silently widens the query, which would let a broken filter pass
+  its own test.
+- 26 new python-service tests parametrising the internal-key guard across
+  every endpoint, rather than one representative: the key is this service's
+  entire access control story, and a route added without the dependency
+  would be an unauthenticated read of any tenant's data by organization id.
+
+**Verified:** backend `npm run typecheck`, `npm run lint`, and the full
+Jest suite (170/170, up from 95); python-service `pytest` (30/30, up from
+10); frontend `npm run lint` and `tsc -b && vite build`. All clean.
+
+Not verified this session: nothing was exercised against a real Postgres or
+a running browser. Neither Docker nor a local PostgreSQL was available on
+this machine, so `npm run seed` has never been run against a live database
+— its logic is covered by tests against the in-memory client, and its write
+sequence is straightforward, but the first person with a database should
+run it before trusting the demo script's numbers on screen. Previous
+sessions had Postgres and Playwright available; this one did not, and the
+distinction is worth recording rather than glossing.
+
+**Next (v1.1 candidates, in the order they matter):**
+
+1. **Transactional email**, and the password reset and invite links that
+   depend on it. This is the largest gap for a real customer and everything
+   else in the account lifecycle sits behind it.
+2. **Revocable refresh tokens** — needs server-side token state; right now
+   signing out clears the browser and nothing else.
+3. **Capture a price on SALE movements** so the trend report can attribute
+   revenue to sales recorded outside a sales order. A data model gap, not a
+   query bug.
+4. **SQL aggregates for the dashboard**, before either the SKU count or the
+   instance count grows.
+5. **Shared-state rate limiting** (Redis or the database), required before
+   running more than one API instance.
+6. Smaller: archive/restore for locations and suppliers as an alternative
+   to the delete guards; refresh token rotation; a relation on
+   `SalesOrder.locationId` so the database enforces what the route now
+   checks by hand.

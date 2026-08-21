@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from datetime import datetime, timedelta, timezone
 from io import StringIO
+from typing import Any, Optional
 
 import pandas as pd
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -18,12 +19,18 @@ from app.services.reports import fetch_sales_stock_trend
 router = APIRouter()
 
 
-def require_internal_caller(x_internal_key: str | None = Header(default=None)) -> None:
+# `Optional[str]`, not `str | None`. The `from __future__ import
+# annotations` at the top of this module makes PEP 604 syntax *look* safe on
+# any Python version, but FastAPI resolves parameter annotations at runtime
+# to build the request model — so the union form raises on anything before
+# 3.10, at import time, taking the whole test suite down at collection. The
+# trap is that the failure is nowhere near the syntax that caused it.
+def require_internal_caller(x_internal_key: Optional[str] = Header(default=None)) -> None:
     if x_internal_key != settings.internal_api_key:
         raise HTTPException(status_code=401, detail="Missing or invalid internal API key")
 
 
-def _csv_response(rows: list[dict], filename: str) -> Response:
+def _csv_response(rows: list[dict[str, Any]], filename: str) -> Response:
     df = pd.DataFrame(rows)
     buffer = StringIO()
     df.to_csv(buffer, index=False)

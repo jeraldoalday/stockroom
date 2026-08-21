@@ -112,6 +112,18 @@ class Table {
     const [removed] = this.rows.splice(index, 1);
     return Promise.resolve({ ...removed });
   }
+
+  deleteMany({ where = {} }: { where?: Rec } = {}) {
+    const before = this.rows.length;
+    this.rows = this.rows.filter((r) => !matchesClause(r, where));
+    return Promise.resolve({ count: before - this.rows.length });
+  }
+
+  updateMany({ where = {}, data }: { where?: Rec; data: Rec }) {
+    const matched = this.rows.filter((r) => matchesClause(r, where));
+    matched.forEach((row) => Object.assign(row, data, { updatedAt: new Date() }));
+    return Promise.resolve({ count: matched.length });
+  }
 }
 
 const tables = {

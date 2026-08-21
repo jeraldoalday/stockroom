@@ -11,7 +11,9 @@
     "test": "jest --runInBand",
     "lint": "eslint src --ext .ts",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev"
+    "prisma:migrate": "prisma migrate dev",
+    "seed": "tsx prisma/seed.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.seed.json"
   },
   "dependencies": {
     "@prisma/client": "^5.19.1",
@@ -36,5 +38,8 @@
     "ts-jest": "^29.2.4",
     "tsx": "^4.16.5",
     "typescript": "^5.5.4"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   }
 }

@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { env } from "./env";
@@ -26,7 +27,15 @@ export function signAccessToken(payload: AccessTokenPayload): string {
 
 export function signRefreshToken(payload: { sub: string }): string {
   const options: jwt.SignOptions = { expiresIn: env.jwtRefreshTtl as jwt.SignOptions["expiresIn"] };
-  return jwt.sign(payload, env.jwtRefreshSecret, options);
+  // `jti` makes every issued token unique. Without it the payload is just
+  // {sub, iat, exp}, and `iat`/`exp` have one-second resolution — so two
+  // tokens minted for the same user in the same second are byte-identical.
+  // That was harmless while refresh tokens were stateless, and became a bug
+  // the moment they were stored: identical tokens hash identically, and the
+  // unique index on RefreshToken.tokenHash would reject the second one, so
+  // logging in twice quickly (or rotating immediately after login) failed at
+  // the database.
+  return jwt.sign({ ...payload, jti: crypto.randomUUID() }, env.jwtRefreshSecret, options);
 }
 
 export function verifyAccessToken(token: string): AccessTokenPayload {

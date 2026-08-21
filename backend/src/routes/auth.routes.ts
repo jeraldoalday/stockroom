@@ -36,6 +36,29 @@ const signupLimiter = rateLimit({
   message: "Too many accounts created from this address. Please try again later.",
 });
 
+// /forgot-password is unauthenticated and has a side effect on someone
+// else's inbox, which makes it the one endpoint here that can be abused
+// against a third party rather than against us: unmetered, it mails a
+// stranger a reset link as fast as the loop runs, and writes a token row
+// per request. Keyed by IP and email for the same reason login is — one
+// shared office address shouldn't be able to lock a colleague out of
+// requesting their own reset.
+const forgotPasswordLimiter = rateLimit({
+  limit: 5,
+  windowMs: 60 * 60 * 1000,
+  keyGenerator: (req) => `${req.ip}:${String(req.body?.email ?? "").toLowerCase()}`,
+  message: "Too many password reset requests. Please try again later.",
+});
+
+// The reset token itself is 256 bits, so this isn't about guessing it —
+// it's that an unmetered endpoint doing a hash and a database lookup per
+// request is free work for anyone who wants to spend our CPU.
+const resetPasswordLimiter = rateLimit({
+  limit: 20,
+  windowMs: 15 * 60 * 1000,
+  message: "Too many password reset attempts. Please try again later.",
+});
+
 const signupSchema = z.object({
   organizationName: z.string().min(2).max(120),
   name: z.string().min(1).max(120),
@@ -215,6 +238,7 @@ const forgotPasswordSchema = z.object({ email: z.string().email() });
 // goes out (and in dev, whether anything gets logged).
 router.post(
   "/forgot-password",
+  forgotPasswordLimiter,
   asyncHandler(async (req, res) => {
     const body = forgotPasswordSchema.parse(req.body);
     const email = body.email.toLowerCase();
@@ -258,6 +282,7 @@ const resetPasswordSchema = z.object({
 
 router.post(
   "/reset-password",
+  resetPasswordLimiter,
   asyncHandler(async (req, res) => {
     const body = resetPasswordSchema.parse(req.body);
 

@@ -176,3 +176,72 @@ describe("RateLimiter", () => {
     expect(limiter.size).toBe(1);
   });
 });
+
+// /forgot-password is the only unauthenticated endpoint whose side effect
+// lands on someone *else* — a stranger's inbox. Unmetered, it will mail a
+// reset link as fast as the loop runs and write a token row per request,
+// so it is abusable against a third party rather than only against us.
+describe("password reset rate limiting", () => {
+  it("throttles repeated reset requests for the same address", async () => {
+    await signUp();
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const res = await request(app)
+        .post("/api/auth/forgot-password")
+        .send({ email: CREDENTIALS.email });
+      expect(res.status).toBe(202);
+    }
+
+    const blocked = await request(app)
+      .post("/api/auth/forgot-password")
+      .send({ email: CREDENTIALS.email });
+
+    expect(blocked.status).toBe(429);
+    expect(blocked.body.error).toMatch(/too many password reset requests/i);
+  });
+
+  // The endpoint deliberately answers 202 whether or not the address exists,
+  // so that it isn't a user-enumeration oracle. The limiter must not
+  // reintroduce that leak by throttling only the addresses that do exist.
+  it("throttles unknown addresses identically, so it stays no oracle", async () => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const res = await request(app)
+        .post("/api/auth/forgot-password")
+        .send({ email: "nobody@nowhere.test" });
+      expect(res.status).toBe(202);
+    }
+
+    const blocked = await request(app)
+      .post("/api/auth/forgot-password")
+      .send({ email: "nobody@nowhere.test" });
+    expect(blocked.status).toBe(429);
+  });
+
+  it("does not let one address's limit block another's reset", async () => {
+    await signUp();
+    await signUp("other@shop.test");
+
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      await request(app).post("/api/auth/forgot-password").send({ email: CREDENTIALS.email });
+    }
+
+    const other = await request(app)
+      .post("/api/auth/forgot-password")
+      .send({ email: "other@shop.test" });
+    expect(other.status).toBe(202);
+  });
+
+  it("throttles reset-password attempts", async () => {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const res = await request(app)
+        .post("/api/auth/reset-password")
+        .send({ token: `bogus-${attempt}`, newPassword: "hunter22222" });
+      expect(res.status).toBe(400);
+    }
+
+    const blocked = await request(app)
+      .post("/api/auth/reset-password")
+      .send({ token: "bogus-again", newPassword: "hunter22222" });
+    expect(blocked.status).toBe(429);
+  });
+});

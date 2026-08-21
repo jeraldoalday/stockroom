@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
   getStoredToken,
+  revokeSessionOnServer,
   setSessionExpiredHandler,
   setStoredRefreshToken,
   setStoredToken,
@@ -42,6 +43,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = () => {
+    // Fired before the tokens are cleared, since it needs the refresh token
+    // to name the session. Not awaited: the UI signs out immediately and the
+    // revocation lands on its own.
+    void revokeSessionOnServer();
     setStoredToken(null);
     setStoredRefreshToken(null);
     localStorage.removeItem(USER_STORAGE_KEY);

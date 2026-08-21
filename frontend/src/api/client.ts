@@ -71,12 +71,37 @@ async function refreshAccessToken(): Promise<string> {
   // A bare axios call, not apiClient: going through the instance would
   // attach the dead access token and re-enter this same interceptor on
   // failure, which is an infinite loop waiting to happen.
-  const res = await axios.post<{ accessToken: string }>(
+  const res = await axios.post<{ accessToken: string; refreshToken: string }>(
     `${import.meta.env.VITE_API_URL}/auth/refresh`,
     { refreshToken }
   );
+
   setStoredToken(res.data.accessToken);
+  // The server rotates on every refresh: the token just spent is revoked,
+  // and presenting it again is treated as a replay and burns the whole
+  // session family. So persisting the new one is not an optimisation — drop
+  // it and the *next* refresh signs the user out for good.
+  setStoredRefreshToken(res.data.refreshToken);
   return res.data.accessToken;
+}
+
+/**
+ * Ends the session server-side as well as locally.
+ *
+ * Best-effort: a failure here still clears local storage, because a user who
+ * clicked "sign out" must end up signed out of this browser whatever the
+ * network did. The cost of the request failing is a refresh token that stays
+ * valid until it expires, which is exactly where things stood before there
+ * was a logout endpoint at all.
+ */
+export async function revokeSessionOnServer(): Promise<void> {
+  const refreshToken = getStoredRefreshToken();
+  if (!refreshToken) return;
+  try {
+    await axios.post(`${import.meta.env.VITE_API_URL}/auth/logout`, { refreshToken });
+  } catch {
+    // Deliberately ignored — see above.
+  }
 }
 
 type RetriableRequest = InternalAxiosRequestConfig & { _retriedAfterRefresh?: boolean };

@@ -1,15 +1,36 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
 import { useAuth } from "../context/AuthContext";
 import { changePassword } from "../api/auth";
 import { isApiError } from "../api/errors";
 
+// Long enough to read the confirmation, short enough that nobody starts
+// clicking around a session the server has already ended.
+const SIGN_OUT_DELAY_MS = 2500;
+
 export function AccountPage() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const [formError, setFormError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+
+  // Changing a password revokes every session for the user, this one
+  // included — that is the point of it, since a password is usually changed
+  // to lock someone else out. So the page can't carry on as if nothing
+  // happened: the access token keeps working for up to its 15-minute life
+  // and then every request starts failing with no explanation. Signing out
+  // deliberately, with a message, beats decaying into a broken session.
+  useEffect(() => {
+    if (!success) return undefined;
+    const timer = setTimeout(() => {
+      logout();
+      navigate("/login", { replace: true });
+    }, SIGN_OUT_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [success, logout, navigate]);
 
   const changePasswordMutation = useMutation({
     mutationFn: changePassword,
@@ -60,7 +81,12 @@ export function AccountPage() {
         className="grid max-w-md grid-cols-1 gap-4 rounded-lg border border-gray-200 bg-white p-4"
       >
         {formError && <div className="text-sm text-red-600">{formError}</div>}
-        {success && <div className="text-sm text-green-700">Password updated.</div>}
+        {success && (
+          <div className="text-sm text-green-700">
+            Password updated. This signed you out everywhere, including here — taking you to the
+            sign-in page...
+          </div>
+        )}
         <div>
           <label className="block text-sm font-medium text-gray-700">Current password</label>
           <input

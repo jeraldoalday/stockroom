@@ -3,7 +3,7 @@ import type { ChangeEvent, FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
 import { useAuth } from "../context/AuthContext";
-import { createProduct, fetchProducts, importProductsCsv, updateProduct } from "../api/products";
+import { createCategory, createProduct, fetchCategories, fetchProducts, importProductsCsv, updateProduct } from "../api/products";
 import type { ImportProductsResult } from "../api/products";
 import type { Product } from "../api/types";
 import { isApiError } from "../api/errors";
@@ -27,6 +27,8 @@ export function ProductsPage() {
   const [importResult, setImportResult] = useState<ImportProductsResult | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [categoryError, setCategoryError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const editing = formTarget !== null && formTarget !== "new" ? formTarget : null;
@@ -35,6 +37,29 @@ export function ProductsPage() {
     queryKey: ["products", search],
     queryFn: () => fetchProducts(search || undefined),
   });
+
+  const categoriesQuery = useQuery({
+    queryKey: ["categories"],
+    queryFn: fetchCategories,
+  });
+
+  const createCategoryMutation = useMutation({
+    mutationFn: createCategory,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["categories"] });
+      setNewCategoryName("");
+      setCategoryError(null);
+    },
+    onError: (err) => {
+      setCategoryError(isApiError(err) ? err.response?.data?.error ?? "Could not add category" : "Could not add category");
+    },
+  });
+
+  function handleAddCategory() {
+    const name = newCategoryName.trim();
+    if (!name) return;
+    createCategoryMutation.mutate(name);
+  }
 
   function onSaved() {
     queryClient.invalidateQueries({ queryKey: ["products"] });
@@ -68,9 +93,11 @@ export function ProductsPage() {
     e.preventDefault();
     setFormError(null);
     const form = new FormData(e.currentTarget);
+    const categoryId = String(form.get("categoryId") ?? "");
     const payload = {
       sku: String(form.get("sku")),
       name: String(form.get("name")),
+      categoryId: categoryId || null,
       priceCents: Math.round(Number(form.get("price")) * 100) || 0,
       // The Cost input only renders for an Owner — a STAFF caller must not
       // send costCents at all (the API ignores it, but sending 0 would read
@@ -187,6 +214,38 @@ export function ProductsPage() {
             />
           </div>
           <div>
+            <label className="block text-sm font-medium text-gray-700">Category</label>
+            <select
+              name="categoryId"
+              defaultValue={editing?.categoryId ?? ""}
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+            >
+              <option value="">No category</option>
+              {categoriesQuery.data?.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+            <div className="mt-2 flex gap-2">
+              <input
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                placeholder="New category name"
+                className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-xs"
+              />
+              <button
+                type="button"
+                onClick={handleAddCategory}
+                disabled={createCategoryMutation.isPending || !newCategoryName.trim()}
+                className="whitespace-nowrap rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Add
+              </button>
+            </div>
+            {categoryError && <div className="mt-1 text-xs text-red-600">{categoryError}</div>}
+          </div>
+          <div>
             <label className="block text-sm font-medium text-gray-700">Price ($)</label>
             <input
               name="price"
@@ -255,6 +314,7 @@ export function ProductsPage() {
             <tr>
               <th className="px-4 py-2 text-left font-medium text-gray-600">SKU</th>
               <th className="px-4 py-2 text-left font-medium text-gray-600">Name</th>
+              <th className="px-4 py-2 text-left font-medium text-gray-600">Category</th>
               <th className="px-4 py-2 text-right font-medium text-gray-600">Price</th>
               <th className="px-4 py-2 text-right font-medium text-gray-600">Reorder point</th>
               <th className="px-4 py-2 text-right font-medium text-gray-600">Actions</th>
@@ -263,23 +323,24 @@ export function ProductsPage() {
           <tbody className="divide-y divide-gray-100">
             {productsQuery.isLoading && (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-gray-500">Loading...</td>
+                <td colSpan={6} className="px-4 py-6 text-center text-gray-500">Loading...</td>
               </tr>
             )}
             {productsQuery.isError && (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-red-600">Failed to load products.</td>
+                <td colSpan={6} className="px-4 py-6 text-center text-red-600">Failed to load products.</td>
               </tr>
             )}
             {productsQuery.data?.items.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-gray-500">No products yet.</td>
+                <td colSpan={6} className="px-4 py-6 text-center text-gray-500">No products yet.</td>
               </tr>
             )}
             {productsQuery.data?.items.map((product) => (
               <tr key={product.id}>
                 <td className="px-4 py-2 font-mono text-xs">{product.sku}</td>
                 <td className="px-4 py-2">{product.name}</td>
+                <td className="px-4 py-2 text-gray-500">{product.category?.name ?? "—"}</td>
                 <td className="px-4 py-2 text-right">{formatCents(product.priceCents)}</td>
                 <td className="px-4 py-2 text-right">{product.reorderPoint}</td>
                 <td className="px-4 py-2 text-right">

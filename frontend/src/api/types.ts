@@ -30,6 +30,7 @@ export interface Product {
   name: string;
   description: string | null;
   categoryId: string | null;
+  category?: Category | null;
   // Omitted entirely for a STAFF principal — cost/margin data is Owner-only
   // (PRD §4), stripped server-side rather than sent and hidden client-side.
   costCents?: number;

@@ -15,7 +15,7 @@ export async function fetchProducts(query?: string | ProductQuery): Promise<Prod
 export interface CreateProductPayload {
   sku: string;
   name: string;
-  categoryId?: string;
+  categoryId?: string | null;
   costCents?: number;
   priceCents?: number;
   reorderPoint?: number;
@@ -36,6 +36,11 @@ export async function updateProduct(id: string, payload: UpdateProductPayload): 
 
 export async function fetchCategories(): Promise<Category[]> {
   const res = await apiClient.get<Category[]>("/categories");
+  return res.data;
+}
+
+export async function createCategory(name: string): Promise<Category> {
+  const res = await apiClient.post<Category>("/categories", { name });
   return res.data;
 }
 

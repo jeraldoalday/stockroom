@@ -17,3 +17,6 @@ backend/prisma/dev.db
 *.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts
+
+# python-service test cache
+python-service/.pytest_cache/

@@ -5,6 +5,7 @@ import { asyncHandler } from "../lib/asyncHandler";
 import { requireAuth } from "../middleware/auth";
 import { ApiError } from "../lib/errors";
 import { applyMovementDelta } from "../lib/inventory";
+import { PUBLIC_USER_SELECT } from "../lib/rbac";
 
 const router = Router();
 router.use(requireAuth);
@@ -43,7 +44,10 @@ router.get(
     const [items, total] = await Promise.all([
       prisma.stockMovement.findMany({
         where,
-        include: { product: true, location: true, actor: true },
+        // `actor: true` would pull the whole User row — password hash
+        // included — into the response; only the fields the audit trail
+        // actually displays are selected.
+        include: { product: true, location: true, actor: { select: PUBLIC_USER_SELECT } },
         orderBy: { createdAt: "desc" },
         skip: (query.page - 1) * query.pageSize,
         take: query.pageSize,

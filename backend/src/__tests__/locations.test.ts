@@ -2,13 +2,13 @@ import request from "supertest";
 
 jest.mock("../lib/prisma");
 
-import { __resetPrismaMock } from "../lib/__mocks__/prisma";
+import { resetPrismaMock } from "./testUtils/prismaMock";
 import { createApp } from "../app";
 
 const app = createApp();
 
 beforeEach(() => {
-  __resetPrismaMock();
+  resetPrismaMock();
 });
 
 async function signUpAndGetToken(email: string, orgName: string) {
@@ -152,5 +152,88 @@ describe("Locations API", () => {
       .get("/api/locations")
       .set("Authorization", `Bearer ${tokenA}`);
     expect(listA.body[0].id).not.toBe(listB.body[0].id);
+  });
+});
+
+// An InventoryItem row is created the first time a product/location pair is
+// touched and never removed — it only goes to zero. The delete guard used
+// to count rows rather than stock, so any location that had ever been used
+// became permanently undeletable, behind a message ("has inventory
+// records") that gave the user nothing to act on.
+describe("Deleting a location that has been used", () => {
+  async function setup() {
+    const signup = await request(app).post("/api/auth/signup").send({
+      organizationName: "The Shop",
+      name: "Owner",
+      email: "owner-delete@shop.test",
+      password: "hunter22222",
+    });
+    const auth = { Authorization: `Bearer ${signup.body.accessToken}` };
+
+    const extra = await request(app).post("/api/locations").set(auth).send({ name: "Back Room" });
+    const product = await request(app)
+      .post("/api/products")
+      .set(auth)
+      .send({ sku: "WIDGET-1", name: "Widget", priceCents: 999 });
+
+    return { auth, locationId: extra.body.id as string, productId: product.body.id as string };
+  }
+
+  it("refuses while the location still holds stock, and says what to do", async () => {
+    const { auth, locationId, productId } = await setup();
+    await request(app)
+      .post("/api/stock-movements")
+      .set(auth)
+      .send({ productId, locationId, type: "RECEIVE", quantity: 5 });
+
+    const res = await request(app).delete(`/api/locations/${locationId}`).set(auth);
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/still holds stock/i);
+  });
+
+  it("reports movement history, not stock, once the location is emptied", async () => {
+    const { auth, locationId, productId } = await setup();
+    await request(app)
+      .post("/api/stock-movements")
+      .set(auth)
+      .send({ productId, locationId, type: "RECEIVE", quantity: 5 });
+    await request(app)
+      .post("/api/stock-movements")
+      .set(auth)
+      .send({ productId, locationId, type: "SALE", quantity: 5 });
+
+    const res = await request(app).delete(`/api/locations/${locationId}`).set(auth);
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/stock movement history/i);
+  });
+
+  // SalesOrder.locationId is a plain column with no relation in the schema,
+  // so the database wouldn't stop this and the orders would be left
+  // pointing at a location that no longer exists.
+  it("refuses when a sales order still references the location", async () => {
+    const { auth, locationId, productId } = await setup();
+    await request(app)
+      .post("/api/sales-orders")
+      .set(auth)
+      .send({ locationId, lines: [{ productId, quantity: 1, unitPriceCents: 999 }] });
+
+    const res = await request(app).delete(`/api/locations/${locationId}`).set(auth);
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/sales order/i);
+  });
+
+  it("deletes an unused location and leaves no orphaned inventory rows", async () => {
+    const { auth, locationId } = await setup();
+
+    const res = await request(app).delete(`/api/locations/${locationId}`).set(auth);
+    expect(res.status).toBe(204);
+
+    const remaining = await request(app).get("/api/locations").set(auth);
+    expect(remaining.body.map((location: { id: string }) => location.id)).not.toContain(locationId);
+
+    const inventory = await request(app).get("/api/inventory").set(auth);
+    expect(
+      inventory.body.items.filter((item: { locationId: string }) => item.locationId === locationId)
+    ).toHaveLength(0);
   });
 });

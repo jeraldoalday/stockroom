@@ -4,17 +4,25 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
 import { createCustomer, deleteCustomer, fetchCustomers } from "../api/customers";
 import { isApiError } from "../api/errors";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { useConfirmation } from "../components/useConfirmation";
+import { Pagination } from "../components/Pagination";
+import type { Customer } from "../api/types";
+
+const PAGE_SIZE = 25;
 
 export function CustomersPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
   const [showForm, setShowForm] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
 
   const customersQuery = useQuery({
-    queryKey: ["customers", search],
-    queryFn: () => fetchCustomers(search || undefined),
+    queryKey: ["customers", search, page],
+    queryFn: () => fetchCustomers({ page, pageSize: PAGE_SIZE, ...(search ? { search } : {}) }),
+    placeholderData: (previous) => previous,
   });
 
   const createMutation = useMutation({
@@ -27,6 +35,8 @@ export function CustomersPage() {
       setFormError(isApiError(err) ? err.response?.data?.error ?? "Could not create customer" : "Could not create customer");
     },
   });
+
+  const pendingDelete = useConfirmation<Customer>();
 
   const deleteMutation = useMutation({
     mutationFn: deleteCustomer,
@@ -90,7 +100,10 @@ export function CustomersPage() {
       <input
         placeholder="Search by name..."
         value={search}
-        onChange={(e) => setSearch(e.target.value)}
+        onChange={(e) => {
+          setSearch(e.target.value);
+          setPage(1);
+        }}
         className="mb-4 w-full max-w-sm rounded-md border border-gray-300 px-3 py-2 text-sm"
       />
 
@@ -131,9 +144,8 @@ export function CustomersPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      if (window.confirm(`Delete customer "${customer.name}"? This cannot be undone.`)) {
-                        deleteMutation.mutate(customer.id);
-                      }
+                      setRowError(null);
+                      pendingDelete.request(customer);
                     }}
                     className="text-xs text-red-600 hover:underline"
                   >
@@ -145,6 +157,29 @@ export function CustomersPage() {
           </tbody>
         </table>
       </div>
+
+      <Pagination
+        page={customersQuery.data?.page ?? page}
+        pageSize={customersQuery.data?.pageSize ?? PAGE_SIZE}
+        total={customersQuery.data?.total ?? 0}
+        onPageChange={setPage}
+        label="customers"
+      />
+
+      <ConfirmDialog
+        open={pendingDelete.isOpen}
+        title="Delete this customer?"
+        description={
+          <>
+            <strong>{pendingDelete.target?.name}</strong> will be removed permanently. Customers
+            with sales order history can't be deleted.
+          </>
+        }
+        confirmLabel="Delete customer"
+        busy={deleteMutation.isPending}
+        onCancel={pendingDelete.cancel}
+        onConfirm={() => pendingDelete.confirm((customer) => deleteMutation.mutate(customer.id))}
+      />
     </AppShell>
   );
 }

@@ -3,10 +3,27 @@ import type { ChangeEvent, FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
 import { useAuth } from "../context/AuthContext";
-import { createCategory, createProduct, fetchCategories, fetchProducts, importProductsCsv, updateProduct } from "../api/products";
-import type { ImportProductsResult } from "../api/products";
+import {
+  archiveProduct,
+  createCategory,
+  createProduct,
+  fetchCategories,
+  fetchProducts,
+  importProductsCsv,
+  restoreProduct,
+  updateProduct,
+} from "../api/products";
+import type { ImportProductsResult, ProductStatusFilter } from "../api/products";
 import type { Product } from "../api/types";
 import { isApiError } from "../api/errors";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { useConfirmation } from "../components/useConfirmation";
+
+const STATUS_TABS: { value: ProductStatusFilter; label: string }[] = [
+  { value: "active", label: "Active" },
+  { value: "archived", label: "Archived" },
+  { value: "all", label: "All" },
+];
 
 function formatCents(cents: number): string {
   return (cents / 100).toLocaleString(undefined, { style: "currency", currency: "USD" });
@@ -24,6 +41,8 @@ export function ProductsPage() {
   // null = form closed; a Product = editing it; "new" = the create form.
   const [formTarget, setFormTarget] = useState<Product | "new" | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [status, setStatus] = useState<ProductStatusFilter>("active");
+  const [rowError, setRowError] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<ImportProductsResult | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
@@ -34,8 +53,26 @@ export function ProductsPage() {
   const editing = formTarget !== null && formTarget !== "new" ? formTarget : null;
 
   const productsQuery = useQuery({
-    queryKey: ["products", search],
-    queryFn: () => fetchProducts(search || undefined),
+    queryKey: ["products", search, status],
+    queryFn: () => fetchProducts({ search: search || undefined, status }),
+  });
+
+  const pendingArchive = useConfirmation<Product>();
+
+  function rowErrorFrom(err: unknown, fallback: string) {
+    return isApiError(err) ? err.response?.data?.error ?? fallback : fallback;
+  }
+
+  const archiveMutation = useMutation({
+    mutationFn: archiveProduct,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["products"] }),
+    onError: (err) => setRowError(rowErrorFrom(err, "Could not archive product")),
+  });
+
+  const restoreMutation = useMutation({
+    mutationFn: restoreProduct,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["products"] }),
+    onError: (err) => setRowError(rowErrorFrom(err, "Could not restore product")),
   });
 
   const categoriesQuery = useQuery({
@@ -301,6 +338,26 @@ export function ProductsPage() {
         </form>
       )}
 
+      {rowError && <div className="mb-4 text-sm text-red-600">{rowError}</div>}
+
+      <div className="mb-4 flex gap-1 rounded-md border border-gray-200 bg-white p-1 w-fit">
+        {STATUS_TABS.map((tab) => (
+          <button
+            key={tab.value}
+            type="button"
+            onClick={() => {
+              setRowError(null);
+              setStatus(tab.value);
+            }}
+            className={`rounded px-3 py-1.5 text-sm font-medium ${
+              status === tab.value ? "bg-brand-50 text-brand-700" : "text-gray-600 hover:bg-gray-100"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       <input
         placeholder="Search by name or SKU..."
         value={search}
@@ -337,9 +394,16 @@ export function ProductsPage() {
               </tr>
             )}
             {productsQuery.data?.items.map((product) => (
-              <tr key={product.id}>
+              <tr key={product.id} className={product.isActive ? undefined : "bg-gray-50 text-gray-500"}>
                 <td className="px-4 py-2 font-mono text-xs">{product.sku}</td>
-                <td className="px-4 py-2">{product.name}</td>
+                <td className="px-4 py-2">
+                  {product.name}
+                  {!product.isActive && (
+                    <span className="ml-2 rounded-full bg-gray-200 px-2 py-0.5 text-xs font-medium text-gray-600">
+                      Archived
+                    </span>
+                  )}
+                </td>
                 <td className="px-4 py-2 text-gray-500">{product.category?.name ?? "—"}</td>
                 <td className="px-4 py-2 text-right">{formatCents(product.priceCents)}</td>
                 <td className="px-4 py-2 text-right">{product.reorderPoint}</td>
@@ -354,12 +418,51 @@ export function ProductsPage() {
                   >
                     Edit
                   </button>
+                  {product.isActive ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRowError(null);
+                        pendingArchive.request(product);
+                      }}
+                      className="ml-3 text-xs text-red-600 hover:underline"
+                    >
+                      Archive
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRowError(null);
+                        restoreMutation.mutate(product.id);
+                      }}
+                      className="ml-3 text-xs text-brand-600 hover:underline"
+                    >
+                      Restore
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      <ConfirmDialog
+        open={pendingArchive.isOpen}
+        title="Archive this product?"
+        description={
+          <>
+            <strong>{pendingArchive.target?.name}</strong> ({pendingArchive.target?.sku}) will be
+            hidden from the catalogue, orders and reports. Its stock movement history is kept, and
+            you can restore it from the Archived tab at any time. Products on an open purchase or
+            sales order can't be archived.
+          </>
+        }
+        confirmLabel="Archive product"
+        busy={archiveMutation.isPending}
+        onCancel={pendingArchive.cancel}
+        onConfirm={() => pendingArchive.confirm((product) => archiveMutation.mutate(product.id))}
+      />
     </AppShell>
   );
 }

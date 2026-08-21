@@ -150,14 +150,50 @@ router.delete(
       throw ApiError.badRequest("Set a different default location before deleting this one");
     }
 
+    // An InventoryItem row is created the first time a product/location
+    // pair is ever touched and is never removed — it just goes to zero. So
+    // "has inventory records" was true forever once a location had been
+    // used, even after it was emptied out, which made every working
+    // location permanently undeletable behind a message that didn't say
+    // why. What actually matters is whether stock would disappear.
     const stockedItems = await prisma.inventoryItem.count({
-      where: { organizationId, locationId: location.id },
+      where: { organizationId, locationId: location.id, quantity: { not: 0 } },
     });
     if (stockedItems > 0) {
-      throw ApiError.conflict("Cannot delete a location that has inventory records");
+      throw ApiError.conflict(
+        "Cannot delete a location that still holds stock — transfer or adjust it to zero first"
+      );
     }
 
-    await prisma.location.delete({ where: { id: location.id } });
+    // Movements at this location are part of the immutable audit trail
+    // (PRD section 7) and carry a foreign key to it, so the row genuinely
+    // cannot go. Checked explicitly to give the same clear answer the
+    // Supplier and Customer routes give, rather than letting the delete
+    // fail at the database and surface as a generic constraint error.
+    const movementCount = await prisma.stockMovement.count({
+      where: { organizationId, locationId: location.id },
+    });
+    if (movementCount > 0) {
+      throw ApiError.conflict("Cannot delete a location with stock movement history");
+    }
+
+    // SalesOrder.locationId is a plain column with no relation declared in
+    // the schema, so nothing at the database level stops this delete from
+    // leaving orders pointing at a location that no longer exists. Guard it
+    // here until the schema grows the relation.
+    const salesOrderCount = await prisma.salesOrder.count({
+      where: { organizationId, locationId: location.id },
+    });
+    if (salesOrderCount > 0) {
+      throw ApiError.conflict("Cannot delete a location that is referenced by a sales order");
+    }
+
+    // Only zeroed rows can remain by this point; they'd otherwise be
+    // orphaned by the delete below.
+    await prisma.$transaction(async (tx) => {
+      await tx.inventoryItem.deleteMany({ where: { organizationId, locationId: location.id } });
+      await tx.location.delete({ where: { id: location.id } });
+    });
     res.status(204).send();
   })
 );

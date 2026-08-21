@@ -101,6 +101,13 @@ export interface InventoryListResponse {
 
 export type MovementType = "RECEIVE" | "SALE" | "TRANSFER_IN" | "TRANSFER_OUT" | "ADJUSTMENT";
 
+export interface MovementActor {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+}
+
 export interface StockMovement {
   id: string;
   type: MovementType;
@@ -109,6 +116,8 @@ export interface StockMovement {
   createdAt: string;
   product?: Product;
   location?: Location;
+  // Narrowed server-side to the public user fields; never the whole User row.
+  actor?: MovementActor;
 }
 
 export interface StockMovementListResponse {

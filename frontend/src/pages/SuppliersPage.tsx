@@ -4,17 +4,25 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
 import { createSupplier, deleteSupplier, fetchSuppliers } from "../api/suppliers";
 import { isApiError } from "../api/errors";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { useConfirmation } from "../components/useConfirmation";
+import { Pagination } from "../components/Pagination";
+import type { Supplier } from "../api/types";
+
+const PAGE_SIZE = 25;
 
 export function SuppliersPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
   const [showForm, setShowForm] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
 
   const suppliersQuery = useQuery({
-    queryKey: ["suppliers", search],
-    queryFn: () => fetchSuppliers(search || undefined),
+    queryKey: ["suppliers", search, page],
+    queryFn: () => fetchSuppliers({ page, pageSize: PAGE_SIZE, ...(search ? { search } : {}) }),
+    placeholderData: (previous) => previous,
   });
 
   const createMutation = useMutation({
@@ -27,6 +35,8 @@ export function SuppliersPage() {
       setFormError(isApiError(err) ? err.response?.data?.error ?? "Could not create supplier" : "Could not create supplier");
     },
   });
+
+  const pendingDelete = useConfirmation<Supplier>();
 
   const deleteMutation = useMutation({
     mutationFn: deleteSupplier,
@@ -90,7 +100,10 @@ export function SuppliersPage() {
       <input
         placeholder="Search by name..."
         value={search}
-        onChange={(e) => setSearch(e.target.value)}
+        onChange={(e) => {
+          setSearch(e.target.value);
+          setPage(1);
+        }}
         className="mb-4 w-full max-w-sm rounded-md border border-gray-300 px-3 py-2 text-sm"
       />
 
@@ -131,9 +144,8 @@ export function SuppliersPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      if (window.confirm(`Delete supplier "${supplier.name}"? This cannot be undone.`)) {
-                        deleteMutation.mutate(supplier.id);
-                      }
+                      setRowError(null);
+                      pendingDelete.request(supplier);
                     }}
                     className="text-xs text-red-600 hover:underline"
                   >
@@ -145,6 +157,29 @@ export function SuppliersPage() {
           </tbody>
         </table>
       </div>
+
+      <Pagination
+        page={suppliersQuery.data?.page ?? page}
+        pageSize={suppliersQuery.data?.pageSize ?? PAGE_SIZE}
+        total={suppliersQuery.data?.total ?? 0}
+        onPageChange={setPage}
+        label="suppliers"
+      />
+
+      <ConfirmDialog
+        open={pendingDelete.isOpen}
+        title="Delete this supplier?"
+        description={
+          <>
+            <strong>{pendingDelete.target?.name}</strong> will be removed permanently. Suppliers
+            with purchase order history can't be deleted.
+          </>
+        }
+        confirmLabel="Delete supplier"
+        busy={deleteMutation.isPending}
+        onCancel={pendingDelete.cancel}
+        onConfirm={() => pendingDelete.confirm((supplier) => deleteMutation.mutate(supplier.id))}
+      />
     </AppShell>
   );
 }

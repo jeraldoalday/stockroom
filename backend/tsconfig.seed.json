@@ -1,0 +1,13 @@
+{
+  // The build's tsconfig has rootDir "src" and only emits the server, so
+  // prisma/seed.ts — which runs through tsx and is never compiled — would
+  // otherwise never be type-checked at all, in CI or locally. This config
+  // checks it against the same strict settings without emitting anything.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["src", "prisma"],
+  "exclude": ["node_modules", "dist"]
+}

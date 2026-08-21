@@ -6,6 +6,7 @@ export interface StockMovementQuery {
   locationId?: string;
   type?: MovementType;
   page?: number;
+  pageSize?: number;
 }
 
 export async function fetchStockMovements(query?: StockMovementQuery): Promise<StockMovementListResponse> {

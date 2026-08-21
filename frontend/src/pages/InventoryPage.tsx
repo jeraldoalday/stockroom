@@ -2,15 +2,20 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
 import { fetchInventory } from "../api/inventory";
+import { Pagination } from "../components/Pagination";
 import { fetchLocations } from "../api/locations";
+
+const PAGE_SIZE = 50;
 
 export function InventoryPage() {
   const [locationId, setLocationId] = useState("");
+  const [page, setPage] = useState(1);
 
   const locationsQuery = useQuery({ queryKey: ["locations"], queryFn: fetchLocations });
   const inventoryQuery = useQuery({
-    queryKey: ["inventory", locationId],
-    queryFn: () => fetchInventory(locationId ? { locationId } : undefined),
+    queryKey: ["inventory", locationId, page],
+    queryFn: () => fetchInventory({ page, pageSize: PAGE_SIZE, ...(locationId ? { locationId } : {}) }),
+    placeholderData: (previous) => previous,
   });
 
   return (
@@ -21,7 +26,10 @@ export function InventoryPage() {
 
       <select
         value={locationId}
-        onChange={(e) => setLocationId(e.target.value)}
+        onChange={(e) => {
+          setLocationId(e.target.value);
+          setPage(1);
+        }}
         className="mb-4 w-full max-w-xs rounded-md border border-gray-300 px-3 py-2 text-sm"
       >
         <option value="">All locations</option>
@@ -71,6 +79,13 @@ export function InventoryPage() {
           </tbody>
         </table>
       </div>
+      <Pagination
+        page={inventoryQuery.data?.page ?? page}
+        pageSize={inventoryQuery.data?.pageSize ?? PAGE_SIZE}
+        total={inventoryQuery.data?.total ?? 0}
+        onPageChange={setPage}
+        label="stock records"
+      />
     </AppShell>
   );
 }

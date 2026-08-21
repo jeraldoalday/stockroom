@@ -4,6 +4,8 @@ import type { InventoryListResponse } from "./types";
 export interface InventoryQuery {
   locationId?: string;
   productId?: string;
+  page?: number;
+  pageSize?: number;
 }
 
 export async function fetchInventory(query?: InventoryQuery): Promise<InventoryListResponse> {

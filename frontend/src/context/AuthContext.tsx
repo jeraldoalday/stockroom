@@ -1,6 +1,11 @@
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { getStoredToken, setStoredToken } from "../api/client";
+import {
+  getStoredToken,
+  setSessionExpiredHandler,
+  setStoredRefreshToken,
+  setStoredToken,
+} from "../api/client";
 import type { AuthResponse, AuthUser } from "../api/types";
 
 const USER_STORAGE_KEY = "stockroom_user";
@@ -29,15 +34,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const setSession = (auth: AuthResponse) => {
     setStoredToken(auth.accessToken);
+    // The refresh token used to be dropped on the floor here, which is why
+    // sessions died after 15 minutes — see api/client.ts.
+    setStoredRefreshToken(auth.refreshToken);
     localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(auth.user));
     setUser(auth.user);
   };
 
   const logout = () => {
     setStoredToken(null);
+    setStoredRefreshToken(null);
     localStorage.removeItem(USER_STORAGE_KEY);
     setUser(null);
   };
+
+  // When a refresh fails there is no recoverable session left, so the API
+  // layer signals up here to clear the user. Dropping `user` flips
+  // `isAuthenticated`, and ProtectedRoute redirects to /login on its own —
+  // no imperative navigation from inside an interceptor.
+  useEffect(() => {
+    setSessionExpiredHandler(() => {
+      setStoredToken(null);
+      setStoredRefreshToken(null);
+      localStorage.removeItem(USER_STORAGE_KEY);
+      setUser(null);
+    });
+    return () => setSessionExpiredHandler(null);
+  }, []);
 
   const value = useMemo<AuthContextValue>(
     () => ({ user, isAuthenticated: Boolean(user && getStoredToken()), setSession, logout }),

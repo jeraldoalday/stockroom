@@ -1,6 +1,6 @@
 # StockRoom — Product Requirements Document
 
-**Status:** v1 (signed off) · **Owner:** Jeraldo Alday · **Last updated:** 2026-08-19
+**Status:** v1.0 — MVP complete, signed off · **Owner:** Jeraldo Alday · **Last updated:** 2026-08-22
 
 ## 1. Problem
 
@@ -64,20 +64,24 @@ by `organizationId` at the middleware layer, never trusted from the client.
 
 ## 6. Functional requirements — MVP
 
-| # | Requirement | Priority |
-|---|---|---|
-| F1 | Email/password signup creates a new Organization + Owner user | P0 |
-| F2 | JWT auth, role-based access (OWNER vs STAFF) | P0 |
-| F3 | CRUD: Products, Categories, Locations, Suppliers, Customers | P0 |
-| F4 | Stock levels per product per location, auto-derived from movements | P0 |
-| F5 | Manual stock adjustment with required reason code | P0 |
-| F6 | Purchase orders: draft → ordered → received (partial receiving allowed) | P0 |
-| F7 | Sales orders: draft → fulfilled (decrements stock, blocks over-sell) | P0 |
-| F8 | Low-stock alert list (qty ≤ reorder point) | P0 |
-| F9 | Dashboard: total stock value, low-stock count, recent movements | P0 |
-| F10 | CSV import (products) and CSV export (products, stock, movements) | P1 |
-| F11 | Basic sales/stock report (Python service) with 7/30-day trend | P1 |
-| F12 | Simple reorder-quantity suggestion (moving-average demand) | P2 |
+| # | Requirement | Priority | Status |
+|---|---|---|---|
+| F1 | Email/password signup creates a new Organization + Owner user | P0 | Shipped (day 1) |
+| F2 | JWT auth, role-based access (OWNER vs STAFF) | P0 | Shipped (day 1, hardened day 13) |
+| F3 | CRUD: Products, Categories, Locations, Suppliers, Customers | P0 | Shipped (days 1-2) |
+| F4 | Stock levels per product per location, auto-derived from movements | P0 | Shipped (day 3) |
+| F5 | Manual stock adjustment with required reason code | P0 | Shipped (day 3) |
+| F6 | Purchase orders: draft → ordered → received (partial receiving allowed) | P0 | Shipped (day 4) |
+| F7 | Sales orders: draft → fulfilled (decrements stock, blocks over-sell) | P0 | Shipped (day 5) |
+| F8 | Low-stock alert list (qty ≤ reorder point) | P0 | Shipped (day 6) |
+| F9 | Dashboard: total stock value, low-stock count, recent movements, top movers | P0 | Shipped (day 6, top movers day 14) |
+| F10 | CSV import (products) and CSV export (products, stock, movements) | P1 | Shipped (day 10) |
+| F11 | Basic sales/stock report (Python service) with 7/30-day trend | P1 | Shipped (day 11) |
+| F12 | Simple reorder-quantity suggestion (moving-average demand) | P2 | Shipped (day 12) |
+
+All twelve are implemented end to end (API, UI, and tests). "Top movers"
+appears in section 3, goal 5 but was missing from the F9 row above until
+day 14; the row now reflects what F9 was always meant to include.
 
 ## 7. Non-functional requirements
 
@@ -156,32 +160,53 @@ session updates `docs/PROGRESS.md` with what shipped and what's next.
   12.~~ **Resolved (Day 14):** Railway, documented in `docs/DEPLOYMENT.md`.
   Decided later than the original "by day 12" target since deployment
   wasn't the critical path while F1-F12 were still landing; nothing in the
-  build depended on this choice until the demo/deploy step itself.
+  build depended on this choice until the demo/deploy step itself. The
+  deployment guide is written host-agnostically regardless (env vars,
+  deploy order, health checks, and the limits that bite past one instance),
+  so the choice is reversible.
 - Whether STAFF role needs per-location scoping — revisit after first
-  design partner feedback. Still open; not needed for any MVP requirement.
+  design partner feedback. Still open; no design partner yet, and not
+  needed for any MVP requirement.
 
 ## 13. v1 sign-off (Day 14)
 
 All P0/P1 functional requirements (F1-F11) and the P2 stretch requirement
-(F12) are implemented and covered by automated tests (95 backend, 10
-python-service) plus manual browser verification every build session. RBAC
-(F2's OWNER/STAFF split, including field-level cost/margin redaction per
-§4) is enforced end-to-end, not just on paper. See `docs/PROGRESS.md` for
-the full day-by-day build log and every architectural decision made along
-the way, and `docs/DEMO.md` for a walkthrough exercising every requirement
-against seeded data.
+(F12) are implemented and covered by automated tests plus manual browser
+verification. RBAC (F2's OWNER/STAFF split, including the field-level
+cost/margin redaction required by §4) is enforced end-to-end, not just on
+paper. See `docs/PROGRESS.md` for the day-by-day log and every
+architectural decision, and `docs/DEMO.md` for a walkthrough exercising
+every requirement against seeded data.
 
-Known gaps carried into v1, none blocking for a design-partner pilot:
-- No real transactional email provider is configured — forgot-password
-  (post-Day-15) works end-to-end against a pluggable `EmailSender`
-  interface, but the shipped implementation just logs the reset link to
-  the server console rather than actually emailing it, and the Team page's
-  invite flow still uses an Owner-set temporary password rather than an
-  emailed invite link. Both are one `EmailSender` implementation away from
-  the real thing once a provider (SendGrid/Postmark/SES/...) is picked.
-- The Python service's DB role is documented as read-only
-  (`docs/DEPLOYMENT.md`) and, as of post-Day-15, actually is in local dev
-  too (`db/init/01-create-readonly-role.sql`) — a production deploy still
-  needs to create the restricted role there per that doc.
-- Per-location reorder points, per-location STAFF scoping: both explicitly
-  deferred (§12).
+Signing off means being explicit about what "complete" does *not* cover,
+since these are the things a first paying customer meets. None of them is
+blocking for a design-partner pilot:
+
+- **No real transactional email provider.** Forgot-password works
+  end-to-end against a pluggable `EmailSender`, but the shipped
+  implementation logs the reset link to the server console instead of
+  sending it, and the Team page's invite flow still uses an Owner-set
+  temporary password rather than an emailed link. Both are one
+  `EmailSender` implementation away from real once a provider is picked.
+  This remains the largest gap for a real customer.
+- **Refresh tokens cannot be revoked.** Signing out clears the browser and
+  nothing else; a stolen token is valid for its full 7 days. Fixing it
+  needs server-side token state.
+- **Rate limiting is per-process**, so it weakens as soon as there is more
+  than one API instance.
+- **Revenue is only attributed to sales made through a sales order.** A
+  SALE recorded directly on the stock movements screen has no line price to
+  read, so it contributes units but not revenue to the trend report. A data
+  model gap, not a query bug: the fix is capturing a price on the movement.
+- **Dashboard aggregates are computed in application code**, not SQL.
+  Within the 10k SKU target in §7; a blocker beyond it.
+- **The read-only DB role for the Python service** is provisioned
+  automatically in local dev (`db/init/01-create-readonly-role.sql`); a
+  production deploy still has to create it, using
+  `backend/prisma/sql/readonly_role.sql` per `docs/DEPLOYMENT.md`.
+- Per-location reorder points and per-location STAFF scoping: both
+  explicitly deferred (§12).
+
+None of these change the answer v1 was built to settle — whether a small
+shop will run its stock on this instead of a spreadsheet. They are what to
+build once someone says yes.

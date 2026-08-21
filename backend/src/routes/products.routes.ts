@@ -9,9 +9,14 @@ import { parseCsvRecords } from "../lib/csv";
 const router = Router();
 router.use(requireAuth);
 
+// DELETE archives a product rather than removing it (its SKU is referenced
+// by historical movements and order lines), so "archived" is a state the
+// catalogue has to be able to show — otherwise a product archived by
+// mistake is unreachable forever, with its SKU still taken.
 const listQuerySchema = z.object({
   search: z.string().trim().min(1).max(200).optional(),
   categoryId: z.string().optional(),
+  status: z.enum(["active", "archived", "all"]).default("active"),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
 });
@@ -24,7 +29,7 @@ router.get(
 
     const where = {
       organizationId,
-      isActive: true,
+      ...(query.status === "all" ? {} : { isActive: query.status === "active" }),
       ...(query.categoryId ? { categoryId: query.categoryId } : {}),
       ...(query.search
         ? {
@@ -268,6 +273,40 @@ router.patch(
 
 // Soft delete: products are referenced by historical stock movements and
 // order lines, so a hard delete would corrupt the audit trail.
+//
+// Archiving is blocked while the product sits on an order that hasn't
+// finished yet. Receiving against an ORDERED purchase order, or fulfilling
+// a DRAFT sales order, posts stock movements for a product the catalogue
+// says is gone — the order would still work, which is worse than it
+// failing, because the stock silently reappears under an archived SKU that
+// no list shows. Finished orders (RECEIVED/FULFILLED/CANCELLED) are history
+// and don't block anything.
+const OPEN_PURCHASE_ORDER_STATUSES = ["DRAFT", "ORDERED", "PARTIALLY_RECEIVED"] as const;
+
+async function countOpenOrderLines(organizationId: string, productId: string) {
+  const [purchaseOrders, salesOrders] = await Promise.all([
+    prisma.purchaseOrder.findMany({
+      where: { organizationId, status: { in: [...OPEN_PURCHASE_ORDER_STATUSES] } },
+    }),
+    prisma.salesOrder.findMany({ where: { organizationId, status: "DRAFT" } }),
+  ]);
+
+  const [purchaseLines, salesLines] = await Promise.all([
+    purchaseOrders.length
+      ? prisma.purchaseOrderLine.count({
+          where: { productId, purchaseOrderId: { in: purchaseOrders.map((order) => order.id) } },
+        })
+      : Promise.resolve(0),
+    salesOrders.length
+      ? prisma.salesOrderLine.count({
+          where: { productId, salesOrderId: { in: salesOrders.map((order) => order.id) } },
+        })
+      : Promise.resolve(0),
+  ]);
+
+  return purchaseLines + salesLines;
+}
+
 router.delete(
   "/:id",
   asyncHandler(async (req, res) => {
@@ -278,9 +317,43 @@ router.delete(
     if (!product) {
       throw ApiError.notFound("Product not found");
     }
+    if (!product.isActive) {
+      throw ApiError.conflict("This product is already archived");
+    }
+
+    const openLines = await countOpenOrderLines(organizationId, product.id);
+    if (openLines > 0) {
+      throw ApiError.conflict("Cannot archive a product that is on an open purchase or sales order");
+    }
 
     await prisma.product.update({ where: { id: product.id }, data: { isActive: false } });
     res.status(204).send();
+  })
+);
+
+// The counterpart to the archive above. There is no SKU conflict to resolve
+// on the way back in: the unique index is on (organizationId, sku)
+// regardless of isActive, so an archived product never freed its SKU for
+// anyone else to take.
+router.post(
+  "/:id/restore",
+  asyncHandler(async (req, res) => {
+    const organizationId = req.auth!.organizationId;
+    const product = await prisma.product.findFirst({
+      where: { id: req.params.id, organizationId },
+    });
+    if (!product) {
+      throw ApiError.notFound("Product not found");
+    }
+    if (product.isActive) {
+      throw ApiError.conflict("This product is not archived");
+    }
+
+    const restored = await prisma.product.update({
+      where: { id: product.id },
+      data: { isActive: true },
+    });
+    res.json(restored);
   })
 );
 

@@ -5,6 +5,9 @@ import { AppShell } from "../components/AppShell";
 import { useAuth } from "../context/AuthContext";
 import { fetchTeamMembers, inviteTeamMember, removeTeamMember, updateTeamMemberRole } from "../api/users";
 import { isApiError } from "../api/errors";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { useConfirmation } from "../components/useConfirmation";
+import type { TeamMember } from "../api/types";
 import type { UserRole } from "../api/types";
 
 export function TeamPage() {
@@ -34,6 +37,8 @@ export function TeamPage() {
       setRowError(isApiError(err) ? err.response?.data?.error ?? "Could not change role" : "Could not change role");
     },
   });
+
+  const pendingRemove = useConfirmation<TeamMember>();
 
   const removeMutation = useMutation({
     mutationFn: removeTeamMember,
@@ -154,7 +159,10 @@ export function TeamPage() {
                     {!isSelf && (
                       <button
                         type="button"
-                        onClick={() => removeMutation.mutate(member.id)}
+                        onClick={() => {
+                          setRowError(null);
+                          pendingRemove.request(member);
+                        }}
                         className="text-xs text-red-600 hover:underline"
                       >
                         Remove
@@ -167,6 +175,22 @@ export function TeamPage() {
           </tbody>
         </table>
       </div>
+
+      <ConfirmDialog
+        open={pendingRemove.isOpen}
+        title="Remove this team member?"
+        description={
+          <>
+            <strong>{pendingRemove.target?.name}</strong> ({pendingRemove.target?.email}) will lose
+            access immediately. Members who have recorded stock movements can't be removed, so the
+            audit trail stays intact.
+          </>
+        }
+        confirmLabel="Remove member"
+        busy={removeMutation.isPending}
+        onCancel={pendingRemove.cancel}
+        onConfirm={() => pendingRemove.confirm((member) => removeMutation.mutate(member.id))}
+      />
     </AppShell>
   );
 }

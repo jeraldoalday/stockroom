@@ -1,10 +1,15 @@
 import { apiClient } from "./client";
 import type { Customer, CustomerListResponse } from "./types";
 
-export async function fetchCustomers(search?: string): Promise<CustomerListResponse> {
-  const res = await apiClient.get<CustomerListResponse>("/customers", {
-    params: search ? { search } : undefined,
-  });
+export interface CustomerQuery {
+  search?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export async function fetchCustomers(query?: string | CustomerQuery): Promise<CustomerListResponse> {
+  const params = typeof query === "string" ? (query ? { search: query } : undefined) : query;
+  const res = await apiClient.get<CustomerListResponse>("/customers", { params });
   return res.data;
 }
 

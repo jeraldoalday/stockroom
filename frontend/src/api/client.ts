@@ -1,10 +1,12 @@
 import axios from "axios";
+import type { AxiosError, InternalAxiosRequestConfig } from "axios";
 
 export const apiClient = axios.create({
   baseURL: import.meta.env.VITE_API_URL,
 });
 
 const TOKEN_STORAGE_KEY = "stockroom_access_token";
+const REFRESH_TOKEN_STORAGE_KEY = "stockroom_refresh_token";
 
 export function getStoredToken(): string | null {
   return localStorage.getItem(TOKEN_STORAGE_KEY);
@@ -18,6 +20,18 @@ export function setStoredToken(token: string | null) {
   }
 }
 
+export function getStoredRefreshToken(): string | null {
+  return localStorage.getItem(REFRESH_TOKEN_STORAGE_KEY);
+}
+
+export function setStoredRefreshToken(token: string | null) {
+  if (token) {
+    localStorage.setItem(REFRESH_TOKEN_STORAGE_KEY, token);
+  } else {
+    localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
+  }
+}
+
 apiClient.interceptors.request.use((config) => {
   const token = getStoredToken();
   if (token) {
@@ -25,3 +39,83 @@ apiClient.interceptors.request.use((config) => {
   }
   return config;
 });
+
+// The API issues a 15-minute access token alongside a 7-day refresh token
+// (JWT_ACCESS_TTL / JWT_REFRESH_TTL). The refresh token was being thrown
+// away at sign-in and /api/auth/refresh was never called, so the app simply
+// broke fifteen minutes into a session: every request 401'd, nothing
+// retried, and the screens showed "Failed to load ..." until the user
+// worked out that signing out and back in fixed it.
+
+/** Called when the session can't be recovered — wired to AuthContext's
+ * logout so the app clears its user and bounces to /login. */
+let onSessionExpired: (() => void) | null = null;
+
+export function setSessionExpiredHandler(handler: (() => void) | null) {
+  onSessionExpired = handler;
+}
+
+// A page typically has several queries in flight at once, so an expired
+// token produces a burst of simultaneous 401s. They share one refresh
+// request: the first 401 starts it and the rest await the same promise,
+// rather than each firing its own refresh and racing to overwrite the
+// token (where the losers write a token that's already been superseded).
+let refreshInFlight: Promise<string> | null = null;
+
+async function refreshAccessToken(): Promise<string> {
+  const refreshToken = getStoredRefreshToken();
+  if (!refreshToken) {
+    throw new Error("No refresh token stored");
+  }
+
+  // A bare axios call, not apiClient: going through the instance would
+  // attach the dead access token and re-enter this same interceptor on
+  // failure, which is an infinite loop waiting to happen.
+  const res = await axios.post<{ accessToken: string }>(
+    `${import.meta.env.VITE_API_URL}/auth/refresh`,
+    { refreshToken }
+  );
+  setStoredToken(res.data.accessToken);
+  return res.data.accessToken;
+}
+
+type RetriableRequest = InternalAxiosRequestConfig & { _retriedAfterRefresh?: boolean };
+
+// Refreshing on a failed sign-in attempt makes no sense — a 401 from these
+// means "wrong password", not "expired token".
+const AUTH_ENDPOINTS = ["/auth/login", "/auth/signup", "/auth/refresh"];
+
+apiClient.interceptors.response.use(
+  (response) => response,
+  async (error: AxiosError) => {
+    const request = error.config as RetriableRequest | undefined;
+
+    const isExpiredSession =
+      error.response?.status === 401 &&
+      request !== undefined &&
+      !request._retriedAfterRefresh &&
+      !AUTH_ENDPOINTS.some((path) => request.url?.startsWith(path));
+
+    if (!isExpiredSession) {
+      return Promise.reject(error);
+    }
+
+    try {
+      refreshInFlight = refreshInFlight ?? refreshAccessToken();
+      const accessToken = await refreshInFlight;
+
+      request._retriedAfterRefresh = true;
+      request.headers.Authorization = `Bearer ${accessToken}`;
+      return await apiClient(request);
+    } catch {
+      // The refresh token is expired or the user was deleted; nothing to
+      // recover, so end the session rather than leaving a half-dead one.
+      setStoredToken(null);
+      setStoredRefreshToken(null);
+      onSessionExpired?.();
+      return Promise.reject(error);
+    } finally {
+      refreshInFlight = null;
+    }
+  }
+);

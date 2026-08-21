@@ -99,11 +99,18 @@ const tables = {
   salesOrderLine: new Table(),
 };
 
+// `__reset` hangs off the mocked client itself rather than being a separate
+// named export, because a test file only ever holds a reference to *this*
+// module instance through `jest.mock("../lib/prisma")`. Importing
+// "../lib/__mocks__/prisma" by path instead registers a second, independent
+// copy of this module — with its own `tables` — so a reset called on that
+// copy silently leaves the store the routes actually use untouched. That is
+// exactly the trap the previous `__resetPrismaMock` named export fell into;
+// see __tests__/testUtils/prismaMock.ts.
 export const prisma = {
   ...tables,
   $transaction: async (fn: (tx: typeof tables) => Promise<unknown>) => fn(tables),
+  __reset() {
+    Object.values(tables).forEach((table) => table.reset());
+  },
 };
-
-export function __resetPrismaMock() {
-  Object.values(tables).forEach((table) => table.reset());
-}

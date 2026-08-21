@@ -2,13 +2,13 @@ import request from "supertest";
 
 jest.mock("../lib/prisma");
 
-import { __resetPrismaMock } from "../lib/__mocks__/prisma";
+import { resetPrismaMock } from "./testUtils/prismaMock";
 import { createApp } from "../app";
 
 const app = createApp();
 
 beforeEach(() => {
-  __resetPrismaMock();
+  resetPrismaMock();
   jest.restoreAllMocks();
 });
 

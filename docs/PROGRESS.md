@@ -682,3 +682,127 @@ probably the highest-leverage single addition once a provider is picked.
   13: there is no configured email provider anywhere in the stack. The
   change-password flow shipped here is the piece that *doesn't* need email;
   the recovery piece genuinely does.
+
+## Day 16 (post-MVP) — 2026-08-21
+
+**Planned:** Picked up the two items explicitly carried forward from Day
+15's entry: (1) the read-only Postgres role, still untrue in local dev on
+every prior session; (3) forgot-password, deferred since Day 13 pending an
+email provider. Also closed a smaller gap noticed while working in
+`ProductsPage`: Category has had a full backend CRUD API since Day 1
+(`categories.routes.ts`, `Product.categoryId`) that no frontend screen ever
+surfaced.
+
+**Shipped — the read-only Postgres role (finally true in local dev):**
+- `db/init/01-create-readonly-role.sql`: idempotent, creates
+  `stockroom_readonly` with `SELECT`-only grants plus an
+  `ALTER DEFAULT PRIVILEGES FOR ROLE stockroom` rule so tables Prisma
+  migrates in *later* stay covered automatically — verified this by adding
+  this session's own new `password_reset_tokens` table afterward and
+  confirming the readonly role could already `SELECT` from it with no
+  re-grant needed.
+- Wired into `docker-compose.yml` via `docker-entrypoint-initdb.d` (runs
+  automatically as the superuser `POSTGRES_USER` on first container init).
+  Documented the manual path for non-Docker local dev (every session so
+  far, including this one, has used `pg_ctlcluster` directly): the script
+  needs to run as a Postgres superuser, not the plain `stockroom` app role,
+  since creating a role requires `CREATEROLE`.
+- `python-service/.env.example`'s `DATABASE_URL` now points at
+  `stockroom_readonly` instead of the shared read/write role.
+- **Verified for real, not just documented:** fresh local Postgres, ran the
+  script, applied migrations, confirmed `SELECT` succeeds and `INSERT`
+  gets `permission denied for table organizations` as the readonly role,
+  and that `python-service`'s `/health` reports `"database":"connected"`
+  running against it.
+
+**Shipped — category selection on the product form:**
+- `ProductsPage`'s create/edit form gained a category `<select>` (from
+  `GET /categories`) plus a small inline "new category name + Add" control
+  that `POST`s `/categories` and refreshes the list — no separate
+  category-management screen, matching how minimal the rest of this form
+  already is. Products table gained a Category column.
+- No backend changes needed — `GET /products` already `include`s
+  `category`, this was purely a missing frontend surface.
+- Verified with a Playwright script: create a category inline, select it,
+  save a product, confirm it renders in the table, reopen for editing, and
+  confirm the select is prefilled with the right category.
+
+**Shipped — forgot-password / reset-password flow:**
+- `backend/src/lib/email.ts`: an `EmailSender` interface with a
+  `ConsoleEmailSender` default that logs the message instead of sending it
+  — still no real provider configured anywhere in this stack, but this is
+  the seam a real one (SendGrid/Postmark/SES/...) plugs into later without
+  touching any route code.
+- New Prisma model `PasswordResetToken` (migration
+  `20260821142210_add_password_reset_tokens`): stores only a sha256 hash of
+  the token, never the raw value, with a 1-hour expiry.
+- `POST /api/auth/forgot-password`: always responds `202` whether or not
+  the email matches an account (no user-enumeration oracle); on a match,
+  supersedes any earlier unused token for that user (at most one live link
+  per user) and emails (logs, for now) a `/reset-password?token=...` link
+  built from `CORS_ORIGIN`.
+- `POST /api/auth/reset-password`: validates the token is unused and
+  unexpired, updates the password, marks the token used.
+- Frontend: "Forgot password?" link on the login page, new
+  `ForgotPasswordPage` (always shows the same generic confirmation message)
+  and `ResetPasswordPage` (reads `?token=` from the URL, new + confirm
+  password with a client-side match check), and a success banner back on
+  the login page after a completed reset.
+- 9 new backend tests (happy path incl. old-password-now-fails/new-password
+  -works, unknown-email non-enumeration with an assertion that no email is
+  even sent, unknown-token rejection, reused-token rejection, and
+  superseded-token rejection). Also extended the in-memory Prisma test
+  mock with `updateMany` (needed for the "supersede stale tokens" query)
+  and gave the new table's rows an explicit `usedAt: null` default — the
+  mock doesn't fill in schema defaults the way real Postgres does, and the
+  first pass at this test failed for exactly that reason before the fix.
+- Verified end-to-end with a Playwright script: signup → request a reset →
+  pull the link out of the backend's dev console log → follow it → set a
+  new password → confirm the old password now gets rejected and the new
+  one logs in, with the login page showing the reset-success banner.
+
+**Verified (all three services, this session):** `npm ci && npx prisma
+generate && npx tsc --noEmit && npm test` on the backend (104/104, +9
+new), `pip install -r requirements.txt && pytest -q` on python-service
+(10/10, unaffected by any change this session), `npm ci && npm run build`
+on the frontend — all clean. Beyond the build/test commands: real local
+Postgres (`pg_ctlcluster 16 main start`, created the `stockroom` role/db
+from scratch), ran the readonly-role script and both migrations, and drove
+two separate Playwright scripts covering the category and password-reset
+flows above against all three running services. No console/network errors
+in either run beyond the expected favicon 404 and one deliberate 401 from
+testing that the old password now fails.
+
+**Found and fixed one process mistake while working, not a product bug:**
+mid-session, a `cd`/`cp` mixup while setting up a frontend `.env` for
+browser verification accidentally overwrote `backend/.env` with the
+frontend's `VITE_API_URL` line, which broke the local backend for a few
+minutes until caught by `DATABASE_URL` missing at server boot. `.env` is
+gitignored, so nothing reached the repo — noted here only so the next
+session doesn't spend time confused if this pattern resurfaces (`cd` back
+into the right directory rather than trusting one shell session to still
+be there after a background command).
+
+**Next:** Item 3 from the running post-MVP list (per-location reorder
+points) is the one PRD §12 explicitly marks as an open, not-yet-needed
+question rather than a real gap, so it's a genuine product decision to
+raise with a design partner rather than something to just build — left
+alone again this session for that reason, not from time pressure. Beyond
+that, reasonable next slices: (1) a real transactional email provider,
+which turns this session's `ConsoleEmailSender` into actual delivery for
+both forgot-password and Team invites at once; (2) a lightweight category
+management view (rename/delete) now that categories are user-created
+in-app rather than only via CSV import — today there's no way to fix a
+typo'd category name or delete an unused one; (3) integration/CI testing
+against a real Postgres, which every session so far has done manually
+rather than as an automated CI step.
+
+**Blockers/decisions carried forward:**
+- Password-reset tokens are single-use and superseded on each new
+  `forgot-password` request, but there's no scheduled cleanup of expired/
+  used rows — fine at any realistic scale for a while, but worth a cron/
+  cleanup job if `password_reset_tokens` ever becomes large enough to
+  matter.
+- Did not add category rename/delete UI this session, only
+  create-and-select — kept the slice to what the product form actually
+  needed. Flagged above as a reasonable next pickup.

@@ -172,12 +172,16 @@ the way, and `docs/DEMO.md` for a walkthrough exercising every requirement
 against seeded data.
 
 Known gaps carried into v1, none blocking for a design-partner pilot:
-- No transactional email (invite links, password reset) — the Team page's
-  invite flow uses an Owner-set temporary password instead (§4, Day 13
-  decision).
+- No real transactional email provider is configured — forgot-password
+  (post-Day-15) works end-to-end against a pluggable `EmailSender`
+  interface, but the shipped implementation just logs the reset link to
+  the server console rather than actually emailing it, and the Team page's
+  invite flow still uses an Owner-set temporary password rather than an
+  emailed invite link. Both are one `EmailSender` implementation away from
+  the real thing once a provider (SendGrid/Postmark/SES/...) is picked.
 - The Python service's DB role is documented as read-only
-  (`docs/DEPLOYMENT.md`) but local dev has always used one shared
-  read/write role — a production deploy must actually create the
-  restricted role before going live.
+  (`docs/DEPLOYMENT.md`) and, as of post-Day-15, actually is in local dev
+  too (`db/init/01-create-readonly-role.sql`) — a production deploy still
+  needs to create the restricted role there per that doc.
 - Per-location reorder points, per-location STAFF scoping: both explicitly
   deferred (§12).

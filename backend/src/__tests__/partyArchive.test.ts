@@ -29,7 +29,7 @@ const PARTIES = [
   { path: "customers", label: "customer", name: "Northside Café" },
 ] as const;
 
-describe.each(PARTIES)("Archiving a $label", ({ path, label, name }) => {
+describe.each(PARTIES)("Archiving a $label", ({ path, name }) => {
   async function create(auth: Record<string, string>) {
     const res = await request(app).post(`/api/${path}`).set(auth).send({ name });
     expect(res.status).toBe(201);

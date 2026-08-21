@@ -177,10 +177,13 @@ router.delete(
       throw ApiError.conflict("Cannot delete a location with stock movement history");
     }
 
-    // SalesOrder.locationId is a plain column with no relation declared in
-    // the schema, so nothing at the database level stops this delete from
-    // leaving orders pointing at a location that no longer exists. Guard it
-    // here until the schema grows the relation.
+    // The database now enforces this too (sales_orders.locationId is a
+    // RESTRICT foreign key), so this check is no longer the only thing
+    // standing between a delete and a set of orders pointing at a location
+    // that no longer exists. It stays because the constraint violation
+    // would surface as a generic 409 about a referenced record, and
+    // naming the reason is the difference between a user knowing what to
+    // do and filing a bug.
     const salesOrderCount = await prisma.salesOrder.count({
       where: { organizationId, locationId: location.id },
     });

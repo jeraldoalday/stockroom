@@ -44,15 +44,15 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users           User[]
-  locations       Location[]
-  categories      Category[]
-  suppliers       Supplier[]
-  customers       Customer[]
-  products        Product[]
-  stockMovements  StockMovement[]
-  purchaseOrders  PurchaseOrder[]
-  salesOrders     SalesOrder[]
+  users          User[]
+  locations      Location[]
+  categories     Category[]
+  suppliers      Supplier[]
+  customers      Customer[]
+  products       Product[]
+  stockMovements StockMovement[]
+  purchaseOrders PurchaseOrder[]
+  salesOrders    SalesOrder[]
 
   @@map("organizations")
 }
@@ -112,17 +112,17 @@ model PasswordResetToken {
 // the whole family is revoked and everyone re-authenticates. That is the
 // standard refresh-token-reuse response (OAuth 2.0 BCP section 4.14.2).
 model RefreshToken {
-  id             String    @id @default(cuid())
-  userId         String
-  user           User      @relation(fields: [userId], references: [id])
-  tokenHash      String    @unique
-  familyId       String
-  expiresAt      DateTime
-  revokedAt      DateTime?
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id])
+  tokenHash    String    @unique
+  familyId     String
+  expiresAt    DateTime
+  revokedAt    DateTime?
   // Set when this token is rotated, so a replay can be traced to the token
   // that superseded it when reading the table by hand.
-  replacedById   String?
-  createdAt      DateTime  @default(now())
+  replacedById String?
+  createdAt    DateTime  @default(now())
 
   @@index([userId])
   @@index([familyId])
@@ -141,6 +141,7 @@ model Location {
 
   inventoryItems InventoryItem[]
   stockMovements StockMovement[]
+  salesOrders    SalesOrder[]
 
   @@unique([organizationId, name])
   @@index([organizationId])
@@ -221,10 +222,10 @@ model Product {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  inventoryItems      InventoryItem[]
-  stockMovements      StockMovement[]
-  purchaseOrderLines  PurchaseOrderLine[]
-  salesOrderLines     SalesOrderLine[]
+  inventoryItems     InventoryItem[]
+  stockMovements     StockMovement[]
+  purchaseOrderLines PurchaseOrderLine[]
+  salesOrderLines    SalesOrderLine[]
 
   @@unique([organizationId, sku])
   @@index([organizationId])
@@ -236,14 +237,14 @@ model Product {
 // Source of truth is StockMovement; this table is updated transactionally
 // alongside every movement insert so reads stay O(1).
 model InventoryItem {
-  id             String       @id @default(cuid())
+  id             String   @id @default(cuid())
   organizationId String
   productId      String
-  product        Product      @relation(fields: [productId], references: [id])
+  product        Product  @relation(fields: [productId], references: [id])
   locationId     String
-  location       Location     @relation(fields: [locationId], references: [id])
-  quantity       Int          @default(0)
-  updatedAt      DateTime     @updatedAt
+  location       Location @relation(fields: [locationId], references: [id])
+  quantity       Int      @default(0)
+  updatedAt      DateTime @updatedAt
 
   @@unique([productId, locationId])
   @@index([organizationId])
@@ -252,15 +253,15 @@ model InventoryItem {
 }
 
 model StockMovement {
-  id             String        @id @default(cuid())
-  organizationId String
-  organization   Organization  @relation(fields: [organizationId], references: [id])
-  productId      String
-  product        Product       @relation(fields: [productId], references: [id])
-  locationId     String
-  location       Location      @relation(fields: [locationId], references: [id])
-  type           MovementType
-  quantity       Int
+  id              String         @id @default(cuid())
+  organizationId  String
+  organization    Organization   @relation(fields: [organizationId], references: [id])
+  productId       String
+  product         Product        @relation(fields: [productId], references: [id])
+  locationId      String
+  location        Location       @relation(fields: [locationId], references: [id])
+  type            MovementType
+  quantity        Int
   // Unit price for a SALE, in cents. Revenue used to be recoverable only by
   // joining back to a sales order line, so a SALE recorded straight through
   // POST /stock-movements — a counter sale, the common case for a shop —
@@ -268,15 +269,15 @@ model StockMovement {
   // understating takings. Nullable because it is meaningless on a receipt,
   // transfer or adjustment, and because movements recorded before this
   // column existed genuinely have no price to record.
-  unitPriceCents Int?
-  reason         String?
-  actorId        String
-  actor          User          @relation(fields: [actorId], references: [id])
+  unitPriceCents  Int?
+  reason          String?
+  actorId         String
+  actor           User           @relation(fields: [actorId], references: [id])
   purchaseOrderId String?
   purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
   salesOrderId    String?
   salesOrder      SalesOrder?    @relation(fields: [salesOrderId], references: [id])
-  createdAt      DateTime      @default(now())
+  createdAt       DateTime       @default(now())
 
   @@index([organizationId])
   @@index([organizationId, productId, locationId])
@@ -285,15 +286,15 @@ model StockMovement {
 }
 
 model PurchaseOrder {
-  id             String               @id @default(cuid())
+  id             String              @id @default(cuid())
   organizationId String
-  organization   Organization         @relation(fields: [organizationId], references: [id])
+  organization   Organization        @relation(fields: [organizationId], references: [id])
   supplierId     String
-  supplier       Supplier             @relation(fields: [supplierId], references: [id])
-  status         PurchaseOrderStatus  @default(DRAFT)
+  supplier       Supplier            @relation(fields: [supplierId], references: [id])
+  status         PurchaseOrderStatus @default(DRAFT)
   notes          String?
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
 
   lines          PurchaseOrderLine[]
   stockMovements StockMovement[]
@@ -304,36 +305,44 @@ model PurchaseOrder {
 }
 
 model PurchaseOrderLine {
-  id              String        @id @default(cuid())
-  purchaseOrderId String
-  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
-  productId       String
-  product         Product       @relation(fields: [productId], references: [id])
-  quantityOrdered Int
-  quantityReceived Int          @default(0)
-  unitCostCents   Int
+  id               String        @id @default(cuid())
+  purchaseOrderId  String
+  purchaseOrder    PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+  productId        String
+  product          Product       @relation(fields: [productId], references: [id])
+  quantityOrdered  Int
+  quantityReceived Int           @default(0)
+  unitCostCents    Int
 
   @@index([purchaseOrderId])
   @@map("purchase_order_lines")
 }
 
 model SalesOrder {
-  id             String            @id @default(cuid())
+  id             String           @id @default(cuid())
   organizationId String
-  organization   Organization      @relation(fields: [organizationId], references: [id])
+  organization   Organization     @relation(fields: [organizationId], references: [id])
   customerId     String?
-  customer       Customer?         @relation(fields: [customerId], references: [id])
+  customer       Customer?        @relation(fields: [customerId], references: [id])
   locationId     String
-  status         SalesOrderStatus  @default(DRAFT)
+  // Declared as a relation so the database enforces it. It was a bare
+  // column until now, which meant nothing but application code stopped a
+  // location being deleted out from under the orders that shipped from it —
+  // and the delete route only grew that check once the gap was noticed.
+  // The route keeps its check for the sake of a clear error message; this
+  // is the backstop for every path that doesn't go through it.
+  location       Location         @relation(fields: [locationId], references: [id])
+  status         SalesOrderStatus @default(DRAFT)
   notes          String?
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 
   lines          SalesOrderLine[]
   stockMovements StockMovement[]
 
   @@index([organizationId])
   @@index([organizationId, status])
+  @@index([locationId])
   @@map("sales_orders")
 }
 

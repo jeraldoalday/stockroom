@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
 import { useAuth } from "../context/AuthContext";
-import { fetchDashboardSummary, fetchLowStock } from "../api/dashboard";
+import { fetchDashboardSummary, fetchLowStock, fetchTopMovers } from "../api/dashboard";
 import type { MovementType } from "../api/types";
 
 function formatCents(cents: number): string {
@@ -30,6 +30,10 @@ export function DashboardPage() {
 
   const summaryQuery = useQuery({ queryKey: ["dashboard", "summary"], queryFn: fetchDashboardSummary });
   const lowStockQuery = useQuery({ queryKey: ["dashboard", "low-stock"], queryFn: fetchLowStock });
+  const topMoversQuery = useQuery({
+    queryKey: ["dashboard", "top-movers"],
+    queryFn: () => fetchTopMovers(30, 5),
+  });
 
   return (
     <AppShell>
@@ -127,6 +131,62 @@ export function DashboardPage() {
               </tbody>
             </table>
           </div>
+        </div>
+      </div>
+
+      {/* PRD section 3, goal 5 lists "top movers" alongside stock value and
+          low stock. Placed below the two problem-oriented panels because it
+          is the one that answers "what is working", which is what makes the
+          reorder points above worth maintaining. */}
+      <div className="mt-8">
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-lg font-semibold text-gray-900">Top movers</h2>
+          <span className="text-sm text-gray-500">last {topMoversQuery.data?.days ?? 30} days</span>
+        </div>
+        <div className="mt-3 overflow-hidden rounded-lg border border-gray-200 bg-white">
+          <table className="min-w-full divide-y divide-gray-200 text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-2 text-left font-medium text-gray-600">Product</th>
+                <th className="px-4 py-2 text-right font-medium text-gray-600">Units sold</th>
+                <th className="px-4 py-2 text-right font-medium text-gray-600">Value at list price</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {topMoversQuery.isLoading && (
+                <tr>
+                  <td colSpan={3} className="px-4 py-6 text-center text-gray-500">Loading...</td>
+                </tr>
+              )}
+              {topMoversQuery.isError && (
+                <tr>
+                  <td colSpan={3} className="px-4 py-6 text-center text-red-600">Failed to load top movers.</td>
+                </tr>
+              )}
+              {topMoversQuery.data?.items.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="px-4 py-6 text-center text-gray-500">
+                    No sales recorded in the last {topMoversQuery.data.days} days.
+                  </td>
+                </tr>
+              )}
+              {topMoversQuery.data?.items.map((mover) => (
+                <tr key={mover.productId}>
+                  <td className="px-4 py-2">
+                    {mover.name}
+                    <span className="ml-2 font-mono text-xs text-gray-400">{mover.sku}</span>
+                    {!mover.isActive && (
+                      <span className="ml-2 rounded-full bg-gray-200 px-2 py-0.5 text-xs font-medium text-gray-600">
+                        Archived
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-right font-medium">{mover.unitsSold}</td>
+                  <td className="px-4 py-2 text-right text-gray-500">{formatCents(mover.estimatedValueCents)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     </AppShell>

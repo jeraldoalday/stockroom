@@ -19,6 +19,8 @@ export interface CreateMovementPayload {
   locationId: string;
   type: "RECEIVE" | "SALE" | "ADJUSTMENT";
   quantity: number;
+  /** SALE only — the API rejects it on any other movement type. */
+  unitPriceCents?: number;
   reason?: string;
 }
 

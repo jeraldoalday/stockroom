@@ -112,6 +112,9 @@ export interface StockMovement {
   id: string;
   type: MovementType;
   quantity: number;
+  // Set on SALE movements only — what the goods actually sold for. Visible
+  // to STAFF, unlike cost: PRD §4 withholds margin data, not prices.
+  unitPriceCents: number | null;
   reason: string | null;
   createdAt: string;
   product?: Product;

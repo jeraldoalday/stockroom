@@ -19,6 +19,10 @@ const MOVEMENT_LABELS: Record<MovementType, string> = {
 
 const PAGE_SIZE = 25;
 
+function formatCents(cents: number): string {
+  return (cents / 100).toLocaleString(undefined, { style: "currency", currency: "USD" });
+}
+
 const MOVEMENT_TYPES = Object.keys(MOVEMENT_LABELS) as MovementType[];
 
 export function StockMovementsPage() {
@@ -95,11 +99,18 @@ export function StockMovementsPage() {
     e.preventDefault();
     setFormError(null);
     const form = new FormData(e.currentTarget);
+    // Only sent for a SALE: the API rejects a price on any other type,
+    // since a "unit price" on a receipt or a write-off means nothing.
+    const priceInput = String(form.get("unitPrice") || "");
+    const unitPriceCents =
+      movementType === "SALE" && priceInput !== "" ? Math.round(Number(priceInput) * 100) : undefined;
+
     movementMutation.mutate({
       productId: String(form.get("productId")),
       locationId: String(form.get("locationId")),
       type: movementType,
       quantity: Number(form.get("quantity")),
+      ...(unitPriceCents !== undefined ? { unitPriceCents } : {}),
       reason: String(form.get("reason") || "") || undefined,
     });
   }
@@ -192,6 +203,24 @@ export function StockMovementsPage() {
               ))}
             </select>
           </div>
+          {movementType === "SALE" && (
+            <div className="col-span-2">
+              <label className="block text-sm font-medium text-gray-700">
+                Unit price ($) <span className="text-gray-400">(optional)</span>
+              </label>
+              <input
+                name="unitPrice"
+                type="number"
+                step="0.01"
+                min="0"
+                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                What it sold for. Without this the sale still counts towards units sold, but
+                contributes nothing to revenue on the trend report.
+              </p>
+            </div>
+          )}
           <div className="col-span-2">
             <label className="block text-sm font-medium text-gray-700">
               Reason {movementType === "ADJUSTMENT" ? "(required)" : "(optional)"}
@@ -345,6 +374,7 @@ export function StockMovementsPage() {
               <th className="px-4 py-2 text-left font-medium text-gray-600">Location</th>
               <th className="px-4 py-2 text-left font-medium text-gray-600">Type</th>
               <th className="px-4 py-2 text-right font-medium text-gray-600">Qty</th>
+              <th className="px-4 py-2 text-right font-medium text-gray-600">Unit price</th>
               <th className="px-4 py-2 text-left font-medium text-gray-600">Reason</th>
               <th className="px-4 py-2 text-left font-medium text-gray-600">Recorded by</th>
             </tr>
@@ -352,17 +382,17 @@ export function StockMovementsPage() {
           <tbody className="divide-y divide-gray-100">
             {movementsQuery.isLoading && (
               <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-gray-500">Loading...</td>
+                <td colSpan={8} className="px-4 py-6 text-center text-gray-500">Loading...</td>
               </tr>
             )}
             {movementsQuery.isError && (
               <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-red-600">Failed to load stock movements.</td>
+                <td colSpan={8} className="px-4 py-6 text-center text-red-600">Failed to load stock movements.</td>
               </tr>
             )}
             {movementsQuery.data?.items.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-gray-500">
+                <td colSpan={8} className="px-4 py-6 text-center text-gray-500">
                   {hasFilters ? "No stock movements match these filters." : "No stock movements yet."}
                 </td>
               </tr>
@@ -374,6 +404,11 @@ export function StockMovementsPage() {
                 <td className="px-4 py-2">{movement.location?.name ?? "—"}</td>
                 <td className="px-4 py-2">{MOVEMENT_LABELS[movement.type]}</td>
                 <td className="px-4 py-2 text-right">{movement.quantity > 0 ? `+${movement.quantity}` : movement.quantity}</td>
+                <td className="px-4 py-2 text-right text-gray-500">
+                  {movement.unitPriceCents === null || movement.unitPriceCents === undefined
+                    ? "—"
+                    : formatCents(movement.unitPriceCents)}
+                </td>
                 <td className="px-4 py-2 text-gray-500">{movement.reason ?? "—"}</td>
                 <td className="px-4 py-2 text-gray-500">{movement.actor?.name ?? "—"}</td>
               </tr>

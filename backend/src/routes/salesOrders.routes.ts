@@ -225,6 +225,11 @@ router.post(
             locationId: salesOrder.locationId,
             type: "SALE",
             quantity: -line.quantity,
+            // Copied onto the movement rather than left to be joined back
+            // from the line: the movement is the audit record, and the
+            // price charged is part of what happened. It also means the
+            // trend report reads one table instead of two.
+            unitPriceCents: line.unitPriceCents,
             actorId,
             salesOrderId: salesOrder.id,
             reason: `Fulfilling SO ${salesOrder.id}`,

@@ -67,6 +67,12 @@ const movementSchema = z.object({
     .number()
     .int()
     .refine((v) => v !== 0, "quantity must not be zero"),
+  // What the goods actually sold for. Optional so the existing callers keep
+  // working, and rejected outright on anything but a SALE — a "unit price"
+  // on a stock receipt or a shrinkage write-off has no meaning, and quietly
+  // storing one would put a number in the audit trail that the reports
+  // would then have to decide whether to believe.
+  unitPriceCents: z.number().int().min(0).optional(),
   reason: z.string().min(1).max(500).optional(),
 });
 
@@ -84,6 +90,9 @@ router.post(
     }
     if (body.type !== "ADJUSTMENT" && body.quantity < 0) {
       throw ApiError.badRequest("quantity must be positive for this movement type");
+    }
+    if (body.unitPriceCents !== undefined && body.type !== "SALE") {
+      throw ApiError.badRequest("unitPriceCents only applies to a SALE movement");
     }
 
     await assertProductAndLocation(organizationId, body.productId, body.locationId);
@@ -103,6 +112,7 @@ router.post(
           locationId: body.locationId,
           type: body.type,
           quantity: delta,
+          unitPriceCents: body.unitPriceCents,
           reason: body.reason,
           actorId,
         },

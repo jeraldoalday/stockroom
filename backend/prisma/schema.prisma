@@ -251,6 +251,14 @@ model StockMovement {
   location       Location      @relation(fields: [locationId], references: [id])
   type           MovementType
   quantity       Int
+  // Unit price for a SALE, in cents. Revenue used to be recoverable only by
+  // joining back to a sales order line, so a SALE recorded straight through
+  // POST /stock-movements — a counter sale, the common case for a shop —
+  // contributed units to the trend report but zero revenue, silently
+  // understating takings. Nullable because it is meaningless on a receipt,
+  // transfer or adjustment, and because movements recorded before this
+  // column existed genuinely have no price to record.
+  unitPriceCents Int?
   reason         String?
   actorId        String
   actor          User          @relation(fields: [actorId], references: [id])

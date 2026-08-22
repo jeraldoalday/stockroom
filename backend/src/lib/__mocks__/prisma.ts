@@ -61,6 +61,51 @@ function matchesClause(record: Rec, clause: Rec): boolean {
   });
 }
 
+/**
+ * Prisma's orderBy, which the store used to ignore outright: every route
+ * asks for one and every route test was silently asserting on insertion
+ * order instead. A route that dropped its orderBy, or sorted by the wrong
+ * column, would have passed.
+ *
+ * Accepts the single-key and array forms Prisma accepts. Nested relation
+ * ordering and aggregate ordering (`{ _sum: { quantity: "desc" } }`) are
+ * supported one level deep, which is as far as the routes go.
+ */
+function compareValues(a: unknown, b: unknown): number {
+  if (a === b) return 0;
+  // Prisma sorts nulls last by default.
+  if (a == null) return 1;
+  if (b == null) return -1;
+  if (a instanceof Date && b instanceof Date) return a.getTime() - b.getTime();
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  return String(a).localeCompare(String(b));
+}
+
+function sortRows(rows: Rec[], orderBy?: Rec | Rec[]): Rec[] {
+  if (!orderBy) return rows;
+  const clauses = Array.isArray(orderBy) ? orderBy : [orderBy];
+  return [...rows].sort((left, right) => {
+    for (const clause of clauses) {
+      for (const [field, direction] of Object.entries(clause)) {
+        let a = left[field];
+        let b = right[field];
+        if (direction && typeof direction === "object") {
+          // Aggregate ordering: { _sum: { quantity: "desc" } }.
+          const [nestedField, nestedDirection] = Object.entries(direction as Rec)[0];
+          a = (a as Rec | undefined)?.[nestedField];
+          b = (b as Rec | undefined)?.[nestedField];
+          const nested = compareValues(a, b);
+          if (nested !== 0) return nestedDirection === "desc" ? -nested : nested;
+          continue;
+        }
+        const comparison = compareValues(a, b);
+        if (comparison !== 0) return direction === "desc" ? -comparison : comparison;
+      }
+    }
+    return 0;
+  });
+}
+
 class Table {
   rows: Rec[] = [];
 
@@ -78,16 +123,104 @@ class Table {
     return Promise.resolve({ ...row });
   }
 
-  findMany({ where = {}, skip = 0, take }: { where?: Rec; skip?: number; take?: number } = {}) {
-    let result = this.rows.filter((r) => matchesClause(r, where));
+  findMany({
+    where = {},
+    skip = 0,
+    take,
+    orderBy,
+  }: { where?: Rec; skip?: number; take?: number; orderBy?: Rec | Rec[] } = {}) {
+    let result = sortRows(this.rows.filter((r) => matchesClause(r, where)), orderBy);
     if (skip) result = result.slice(skip);
     if (take !== undefined) result = result.slice(0, take);
     return Promise.resolve(result.map((r) => ({ ...r })));
   }
 
-  findFirst({ where = {} }: { where?: Rec } = {}) {
-    const row = this.rows.find((r) => matchesClause(r, where));
+  findFirst({ where = {}, orderBy }: { where?: Rec; orderBy?: Rec | Rec[] } = {}) {
+    const [row] = sortRows(this.rows.filter((r) => matchesClause(r, where)), orderBy);
     return Promise.resolve(row ? { ...row } : null);
+  }
+
+  /**
+   * Prisma's groupBy, which compiles to a SQL GROUP BY against a real
+   * database. Supports the `_sum` and `_count` aggregates the routes use;
+   * anything else throws rather than quietly returning undefined, on the
+   * same principle as matchesOperators().
+   */
+  groupBy({
+    by,
+    where = {},
+    _sum,
+    _count,
+    orderBy,
+  }: {
+    by: string[];
+    where?: Rec;
+    _sum?: Rec;
+    _count?: Rec | true;
+    orderBy?: Rec | Rec[];
+  }) {
+    const groups = new Map<string, Rec[]>();
+    for (const row of this.rows.filter((r) => matchesClause(r, where))) {
+      const key = JSON.stringify(by.map((field) => row[field]));
+      const bucket = groups.get(key);
+      if (bucket) bucket.push(row);
+      else groups.set(key, [row]);
+    }
+
+    const result = [...groups.values()].map((rows) => {
+      const group: Rec = {};
+      for (const field of by) group[field] = rows[0][field];
+      if (_sum) {
+        group._sum = Object.fromEntries(
+          Object.keys(_sum).map((field) => [
+            field,
+            // Prisma returns null, not 0, when every value in the group is
+            // null — a distinction the routes have to handle.
+            rows.every((row) => row[field] == null)
+              ? null
+              : rows.reduce((total, row) => total + (Number(row[field]) || 0), 0),
+          ])
+        );
+      }
+      if (_count !== undefined) {
+        group._count =
+          _count === true
+            ? rows.length
+            : Object.fromEntries(
+                Object.keys(_count).map((field) => [
+                  field,
+                  rows.filter((row) => row[field] != null).length,
+                ])
+              );
+      }
+      return group;
+    });
+
+    return Promise.resolve(sortRows(result, orderBy));
+  }
+
+  aggregate({ where = {}, _sum, _count }: { where?: Rec; _sum?: Rec; _count?: Rec | true } = {}) {
+    const rows = this.rows.filter((r) => matchesClause(r, where));
+    const result: Rec = {};
+    if (_sum) {
+      result._sum = Object.fromEntries(
+        Object.keys(_sum).map((field) => [
+          field,
+          rows.every((row) => row[field] == null)
+            ? null
+            : rows.reduce((total, row) => total + (Number(row[field]) || 0), 0),
+        ])
+      );
+    }
+    if (_count !== undefined) {
+      result._count =
+        _count === true
+          ? rows.length
+          : Object.fromEntries(
+              Object.keys(_count).map((field) => [field, rows.filter((row) => row[field] != null).length])
+            );
+    }
+    return Promise.resolve(result);
   }
 
   findUnique({ where = {} }: { where?: Rec } = {}) {

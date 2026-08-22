@@ -2,20 +2,42 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
-import { createLocation, deleteLocation, fetchLocations, updateLocation } from "../api/locations";
+import {
+  archiveLocation,
+  createLocation,
+  fetchLocations,
+  restoreLocation,
+  updateLocation,
+} from "../api/locations";
+import type { LocationStatusFilter } from "../api/locations";
 import { isApiError } from "../api/errors";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useConfirmation } from "../components/useConfirmation";
 import type { Location } from "../api/types";
 
+const STATUS_TABS: { value: LocationStatusFilter; label: string }[] = [
+  { value: "active", label: "Active" },
+  { value: "archived", label: "Archived" },
+  { value: "all", label: "All" },
+];
+
+function describeError(err: unknown, fallback: string): string {
+  return isApiError(err) ? err.response?.data?.error ?? fallback : fallback;
+}
+
 export function LocationsPage() {
   const queryClient = useQueryClient();
+  const [status, setStatus] = useState<LocationStatusFilter>("active");
   const [showForm, setShowForm] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
 
-  const locationsQuery = useQuery({ queryKey: ["locations"], queryFn: fetchLocations });
-  const pendingDelete = useConfirmation<Location>();
+  const locationsQuery = useQuery({
+    queryKey: ["locations", status],
+    queryFn: () => fetchLocations(status),
+    placeholderData: (previous) => previous,
+  });
+  const pendingArchive = useConfirmation<Location>();
 
   const createMutation = useMutation({
     mutationFn: createLocation,
@@ -23,25 +45,25 @@ export function LocationsPage() {
       queryClient.invalidateQueries({ queryKey: ["locations"] });
       setShowForm(false);
     },
-    onError: (err) => {
-      setFormError(isApiError(err) ? err.response?.data?.error ?? "Could not create location" : "Could not create location");
-    },
+    onError: (err) => setFormError(describeError(err, "Could not create location")),
   });
 
   const setDefaultMutation = useMutation({
     mutationFn: (id: string) => updateLocation(id, { isDefault: true }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["locations"] }),
-    onError: (err) => {
-      setRowError(isApiError(err) ? err.response?.data?.error ?? "Could not update location" : "Could not update location");
-    },
+    onError: (err) => setRowError(describeError(err, "Could not update location")),
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: deleteLocation,
+  const archiveMutation = useMutation({
+    mutationFn: archiveLocation,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["locations"] }),
-    onError: (err) => {
-      setRowError(isApiError(err) ? err.response?.data?.error ?? "Could not delete location" : "Could not delete location");
-    },
+    onError: (err) => setRowError(describeError(err, "Could not archive location")),
+  });
+
+  const restoreMutation = useMutation({
+    mutationFn: restoreLocation,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["locations"] }),
+    onError: (err) => setRowError(describeError(err, "Could not restore location")),
   });
 
   function handleCreate(e: FormEvent<HTMLFormElement>) {
@@ -95,6 +117,24 @@ export function LocationsPage() {
         </form>
       )}
 
+      <div className="mb-4 flex w-fit gap-1 rounded-md border border-gray-200 bg-white p-1">
+        {STATUS_TABS.map((tab) => (
+          <button
+            key={tab.value}
+            type="button"
+            onClick={() => {
+              setRowError(null);
+              setStatus(tab.value);
+            }}
+            className={`rounded px-3 py-1.5 text-sm font-medium ${
+              status === tab.value ? "bg-brand-50 text-brand-700" : "text-gray-600 hover:bg-gray-100"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       {rowError && <div className="mb-4 text-sm text-red-600">{rowError}</div>}
 
       <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
@@ -120,37 +160,64 @@ export function LocationsPage() {
             )}
             {locationsQuery.data?.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-gray-500">No locations yet.</td>
+                <td colSpan={4} className="px-4 py-6 text-center text-gray-500">
+                  {status === "archived" ? "No archived locations." : "No locations yet."}
+                </td>
               </tr>
             )}
             {locationsQuery.data?.map((location) => (
-              <tr key={location.id}>
-                <td className="px-4 py-2">{location.name}</td>
+              <tr key={location.id} className={location.isActive ? undefined : "bg-gray-50"}>
+                <td className="px-4 py-2">
+                  {location.name}
+                  {!location.isActive && (
+                    <span className="ml-2 rounded-full bg-gray-200 px-2 py-0.5 text-xs font-medium text-gray-600">
+                      Archived
+                    </span>
+                  )}
+                </td>
                 <td className="px-4 py-2 text-gray-500">{location.address ?? "—"}</td>
                 <td className="px-4 py-2">
                   {location.isDefault ? (
                     <span className="rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700">Default</span>
                   ) : (
-                    <button
-                      type="button"
-                      onClick={() => setDefaultMutation.mutate(location.id)}
-                      className="text-xs text-brand-600 hover:underline"
-                    >
-                      Make default
-                    </button>
+                    // An archived location can't be the default — the default
+                    // is what every stock form proposes, and the API refuses
+                    // to record stock against an archived one.
+                    location.isActive && (
+                      <button
+                        type="button"
+                        onClick={() => setDefaultMutation.mutate(location.id)}
+                        className="text-xs text-brand-600 hover:underline"
+                      >
+                        Make default
+                      </button>
+                    )
                   )}
                 </td>
                 <td className="px-4 py-2 text-right">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRowError(null);
-                      pendingDelete.request(location);
-                    }}
-                    className="text-xs text-red-600 hover:underline"
-                  >
-                    Delete
-                  </button>
+                  {location.isActive ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRowError(null);
+                        pendingArchive.request(location);
+                      }}
+                      className="text-xs text-red-600 hover:underline"
+                    >
+                      Archive
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRowError(null);
+                        restoreMutation.mutate(location.id);
+                      }}
+                      className="text-xs text-brand-600 hover:underline"
+                    >
+                      Restore
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -159,18 +226,20 @@ export function LocationsPage() {
       </div>
 
       <ConfirmDialog
-        open={pendingDelete.isOpen}
-        title="Delete this location?"
+        open={pendingArchive.isOpen}
+        title="Archive this location?"
         description={
           <>
-            <strong>{pendingDelete.target?.name}</strong> will be removed permanently. Locations
-            that still hold stock, or that are set as the default, can't be deleted.
+            <strong>{pendingArchive.target?.name}</strong> will be hidden from every location
+            picker and stop accepting stock. Its movement history is kept, and you can restore it
+            from the Archived tab. A location that still holds stock, or that is the default, has
+            to be emptied or replaced first.
           </>
         }
-        confirmLabel="Delete location"
-        busy={deleteMutation.isPending}
-        onCancel={pendingDelete.cancel}
-        onConfirm={() => pendingDelete.confirm((location) => deleteMutation.mutate(location.id))}
+        confirmLabel="Archive location"
+        busy={archiveMutation.isPending}
+        onCancel={pendingArchive.cancel}
+        onConfirm={() => pendingArchive.confirm((location) => archiveMutation.mutate(location.id))}
       />
     </AppShell>
   );

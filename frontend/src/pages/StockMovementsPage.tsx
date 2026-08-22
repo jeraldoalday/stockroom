@@ -48,7 +48,7 @@ export function StockMovementsPage() {
   const hasFilters = Boolean(filters.productId || filters.locationId || filters.type);
 
   const productsQuery = useQuery({ queryKey: ["products", "all"], queryFn: () => fetchProducts({ pageSize: 100 }) });
-  const locationsQuery = useQuery({ queryKey: ["locations"], queryFn: fetchLocations });
+  const locationsQuery = useQuery({ queryKey: ["locations", "active"], queryFn: () => fetchLocations("active") });
   const movementsQuery = useQuery({
     queryKey: ["stock-movements", filters, page],
     queryFn: () =>

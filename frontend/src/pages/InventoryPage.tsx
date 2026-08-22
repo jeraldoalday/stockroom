@@ -11,7 +11,7 @@ export function InventoryPage() {
   const [locationId, setLocationId] = useState("");
   const [page, setPage] = useState(1);
 
-  const locationsQuery = useQuery({ queryKey: ["locations"], queryFn: fetchLocations });
+  const locationsQuery = useQuery({ queryKey: ["locations", "active"], queryFn: () => fetchLocations("active") });
   const inventoryQuery = useQuery({
     queryKey: ["inventory", locationId, page],
     queryFn: () => fetchInventory({ page, pageSize: PAGE_SIZE, ...(locationId ? { locationId } : {}) }),

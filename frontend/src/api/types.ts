@@ -52,6 +52,7 @@ export interface Location {
   name: string;
   address: string | null;
   isDefault: boolean;
+  isActive: boolean;
 }
 
 export interface Supplier {

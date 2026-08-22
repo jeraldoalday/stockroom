@@ -203,7 +203,7 @@ export function PurchaseOrdersPage() {
   const ordersQuery = useQuery({ queryKey: ["purchase-orders"], queryFn: () => fetchPurchaseOrders() });
   const suppliersQuery = useQuery({ queryKey: ["suppliers", "all"], queryFn: () => fetchSuppliers() });
   const productsQuery = useQuery({ queryKey: ["products", "all"], queryFn: () => fetchProducts({ pageSize: 100 }) });
-  const locationsQuery = useQuery({ queryKey: ["locations"], queryFn: fetchLocations });
+  const locationsQuery = useQuery({ queryKey: ["locations", "active"], queryFn: () => fetchLocations("active") });
 
   function invalidate(id?: string) {
     queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });

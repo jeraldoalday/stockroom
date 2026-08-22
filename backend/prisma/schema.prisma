@@ -136,6 +136,16 @@ model Location {
   name           String
   address        String?
   isDefault      Boolean      @default(false)
+  // Archiving, for the same reason Supplier and Customer have this: every
+  // movement, sales order and inventory row points at a location, so a
+  // location that has ever been used cannot be deleted without either
+  // corrupting that history or being refused. A shop that closes a stockroom
+  // could previously only leave it in every picker forever.
+  //
+  // Unlike a supplier, an archived location is also refused for new stock:
+  // it is a place goods physically are, and stock recorded into somewhere
+  // hidden from every picker is stock nobody can find again.
+  isActive       Boolean      @default(true)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 

@@ -4,6 +4,7 @@ import { prisma } from "../lib/prisma";
 import { asyncHandler } from "../lib/asyncHandler";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { ApiError } from "../lib/errors";
+import { requireStockableLocation } from "../lib/locations";
 import { applyMovementDelta } from "../lib/inventory";
 
 const router = Router();
@@ -215,10 +216,7 @@ router.post(
       throw ApiError.badRequest("Purchase order is not in a receivable state");
     }
 
-    const location = await prisma.location.findFirst({ where: { id: body.locationId, organizationId } });
-    if (!location) {
-      throw ApiError.badRequest("locationId does not belong to this organization");
-    }
+    const location = await requireStockableLocation(organizationId, body.locationId);
 
     const existingLines = await prisma.purchaseOrderLine.findMany({
       where: { purchaseOrderId: purchaseOrder.id },

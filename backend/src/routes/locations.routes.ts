@@ -9,11 +9,23 @@ import { ApiError } from "../lib/errors";
 const router = Router();
 router.use(requireAuth);
 
+// Archived locations stay in the database because inventory rows, stock
+// movements and sales orders all point at them; `status` decides whether the
+// list shows them. Defaults to "active", so every existing caller — every
+// location picker in the app — behaves exactly as it did.
+const listQuerySchema = z.object({
+  status: z.enum(["active", "archived", "all"]).default("active"),
+});
+
 router.get(
   "/",
   asyncHandler(async (req, res) => {
+    const query = listQuerySchema.parse(req.query);
     const locations = await prisma.location.findMany({
-      where: { organizationId: req.auth!.organizationId },
+      where: {
+        organizationId: req.auth!.organizationId,
+        ...(query.status === "all" ? {} : { isActive: query.status === "active" }),
+      },
       orderBy: { name: "asc" },
     });
     res.json(locations);
@@ -82,11 +94,18 @@ router.post(
     const body = locationSchema.parse(req.body);
     const organizationId = req.auth!.organizationId;
 
+    // The unique index covers archived rows too, so a clash has to name the
+    // archived one — otherwise the user retypes the same name and gets the
+    // same refusal with nothing on screen that explains it.
     const existing = await prisma.location.findFirst({
       where: { organizationId, name: body.name },
     });
     if (existing) {
-      throw ApiError.conflict("A location with this name already exists");
+      throw ApiError.conflict(
+        existing.isActive
+          ? "A location with this name already exists"
+          : "An archived location already uses this name — restore or rename it"
+      );
     }
 
     const location = await prisma.$transaction(async (tx) => {
@@ -121,6 +140,14 @@ router.patch(
       }
     }
 
+    // The default is where the app proposes to put stock, so it has to be
+    // somewhere stock can go. Allowing an archived location to hold the
+    // flag would leave every new movement defaulting to a place the API
+    // then refuses.
+    if (body.isDefault && !location.isActive) {
+      throw ApiError.badRequest("Restore this location before making it the default");
+    }
+
     const updated = await prisma.$transaction(async (tx) => {
       if (body.isDefault) {
         await clearExistingDefault(tx, organizationId, location.id);
@@ -131,6 +158,15 @@ router.patch(
   })
 );
 
+// Archive, not delete. Deleting was refused outright once a location had
+// any movement history or any sales order pointing at it — which is every
+// location that has ever been used for anything. So the stockroom you have
+// stopped using, the one you actually want out of the pickers, was the one
+// the product insisted on keeping. Archiving always succeeds, keeps the
+// history intact, and can be undone.
+//
+// Three things are still refused, because they would leave the app in a
+// state a user cannot act on:
 router.delete(
   "/:id",
   asyncHandler(async (req, res) => {
@@ -141,63 +177,63 @@ router.delete(
     if (!location) {
       throw ApiError.notFound("Location not found");
     }
-
-    const totalLocations = await prisma.location.count({ where: { organizationId } });
-    if (totalLocations <= 1) {
-      throw ApiError.badRequest("An organization must have at least one location");
+    if (!location.isActive) {
+      throw ApiError.conflict("This location is already archived");
     }
+
+    // 1. Somewhere has to be left to record stock into.
+    const activeLocations = await prisma.location.count({
+      where: { organizationId, isActive: true },
+    });
+    if (activeLocations <= 1) {
+      throw ApiError.badRequest("An organization must have at least one active location");
+    }
+
+    // 2. The default is what every form proposes; archiving it would leave
+    //    the app suggesting a location the API refuses.
     if (location.isDefault) {
-      throw ApiError.badRequest("Set a different default location before deleting this one");
+      throw ApiError.badRequest("Set a different default location before archiving this one");
     }
 
-    // An InventoryItem row is created the first time a product/location
-    // pair is ever touched and is never removed — it just goes to zero. So
-    // "has inventory records" was true forever once a location had been
-    // used, even after it was emptied out, which made every working
-    // location permanently undeletable behind a message that didn't say
-    // why. What actually matters is whether stock would disappear.
+    // 3. Stock left behind would still count towards the organization's
+    //    valuation while being invisible in every picker — and because an
+    //    archived location cannot be transferred out of either, it would be
+    //    stranded there until someone restored the location. Emptying it
+    //    first is the only order of operations that works, so the error
+    //    says exactly that.
     const stockedItems = await prisma.inventoryItem.count({
       where: { organizationId, locationId: location.id, quantity: { not: 0 } },
     });
     if (stockedItems > 0) {
       throw ApiError.conflict(
-        "Cannot delete a location that still holds stock — transfer or adjust it to zero first"
+        "Cannot archive a location that still holds stock — transfer or adjust it to zero first"
       );
     }
 
-    // Movements at this location are part of the immutable audit trail
-    // (PRD section 7) and carry a foreign key to it, so the row genuinely
-    // cannot go. Checked explicitly to give the same clear answer the
-    // Supplier and Customer routes give, rather than letting the delete
-    // fail at the database and surface as a generic constraint error.
-    const movementCount = await prisma.stockMovement.count({
-      where: { organizationId, locationId: location.id },
-    });
-    if (movementCount > 0) {
-      throw ApiError.conflict("Cannot delete a location with stock movement history");
-    }
-
-    // The database now enforces this too (sales_orders.locationId is a
-    // RESTRICT foreign key), so this check is no longer the only thing
-    // standing between a delete and a set of orders pointing at a location
-    // that no longer exists. It stays because the constraint violation
-    // would surface as a generic 409 about a referenced record, and
-    // naming the reason is the difference between a user knowing what to
-    // do and filing a bug.
-    const salesOrderCount = await prisma.salesOrder.count({
-      where: { organizationId, locationId: location.id },
-    });
-    if (salesOrderCount > 0) {
-      throw ApiError.conflict("Cannot delete a location that is referenced by a sales order");
-    }
-
-    // Only zeroed rows can remain by this point; they'd otherwise be
-    // orphaned by the delete below.
-    await prisma.$transaction(async (tx) => {
-      await tx.inventoryItem.deleteMany({ where: { organizationId, locationId: location.id } });
-      await tx.location.delete({ where: { id: location.id } });
-    });
+    await prisma.location.update({ where: { id: location.id }, data: { isActive: false } });
     res.status(204).send();
+  })
+);
+
+router.post(
+  "/:id/restore",
+  asyncHandler(async (req, res) => {
+    const organizationId = req.auth!.organizationId;
+    const location = await prisma.location.findFirst({
+      where: { id: req.params.id, organizationId },
+    });
+    if (!location) {
+      throw ApiError.notFound("Location not found");
+    }
+    if (location.isActive) {
+      throw ApiError.conflict("This location is not archived");
+    }
+
+    const restored = await prisma.location.update({
+      where: { id: location.id },
+      data: { isActive: true },
+    });
+    res.json(restored);
   })
 );
 

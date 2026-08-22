@@ -4,6 +4,7 @@ import { prisma } from "../lib/prisma";
 import { asyncHandler } from "../lib/asyncHandler";
 import { requireAuth } from "../middleware/auth";
 import { ApiError } from "../lib/errors";
+import { requireStockableLocation } from "../lib/locations";
 import { applyMovementDelta } from "../lib/inventory";
 
 const router = Router();
@@ -85,10 +86,7 @@ router.post(
     const body = createSchema.parse(req.body);
     const organizationId = req.auth!.organizationId;
 
-    const location = await prisma.location.findFirst({ where: { id: body.locationId, organizationId } });
-    if (!location) {
-      throw ApiError.badRequest("locationId does not belong to this organization");
-    }
+    await requireStockableLocation(organizationId, body.locationId);
     if (body.customerId) {
       const customer = await prisma.customer.findFirst({ where: { id: body.customerId, organizationId } });
       if (!customer) {

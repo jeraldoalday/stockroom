@@ -270,7 +270,7 @@ class Table {
 const tables = {
   organization: new Table(),
   user: new Table({ role: "STAFF" }),
-  location: new Table({ isDefault: false }),
+  location: new Table({ isDefault: false, isActive: true }),
   category: new Table(),
   supplier: new Table({ isActive: true }),
   customer: new Table({ isActive: true }),

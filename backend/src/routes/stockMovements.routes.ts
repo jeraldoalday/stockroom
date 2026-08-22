@@ -5,18 +5,23 @@ import { asyncHandler } from "../lib/asyncHandler";
 import { requireAuth } from "../middleware/auth";
 import { ApiError } from "../lib/errors";
 import { applyMovementDelta } from "../lib/inventory";
+import { requireStockableLocation } from "../lib/locations";
 import { PUBLIC_USER_SELECT } from "../lib/rbac";
 
 const router = Router();
 router.use(requireAuth);
 
-async function assertProductAndLocation(organizationId: string, productId: string, locationId: string) {
+async function assertProductAndLocation(
+  organizationId: string,
+  productId: string,
+  locationId: string,
+  locationField = "locationId"
+) {
   const [product, location] = await Promise.all([
     prisma.product.findFirst({ where: { id: productId, organizationId } }),
-    prisma.location.findFirst({ where: { id: locationId, organizationId } }),
+    requireStockableLocation(organizationId, locationId, locationField),
   ]);
   if (!product) throw ApiError.badRequest("productId does not belong to this organization");
-  if (!location) throw ApiError.badRequest("locationId does not belong to this organization");
   return { product, location };
 }
 
@@ -142,8 +147,12 @@ router.post(
       throw ApiError.badRequest("fromLocationId and toLocationId must differ");
     }
 
-    await assertProductAndLocation(organizationId, body.productId, body.fromLocationId);
-    await assertProductAndLocation(organizationId, body.productId, body.toLocationId);
+    // Transferring *out* of an archived location is refused along with
+    // transferring in, which is the awkward half of the rule: it means a
+    // location must be emptied before it is archived, not after. That is
+    // enforced at the point of archiving, where the message can say so.
+    await assertProductAndLocation(organizationId, body.productId, body.fromLocationId, "fromLocationId");
+    await assertProductAndLocation(organizationId, body.productId, body.toLocationId, "toLocationId");
 
     const [outMovement, inMovement] = await prisma.$transaction(async (tx) => {
       await applyMovementDelta(tx, {

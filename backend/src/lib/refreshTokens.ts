@@ -88,6 +88,9 @@ export async function revokeAllForUser(tx: TxClient, userId: string) {
 export interface RotationResult {
   userId: string;
   token: string;
+  // The rotation family, carried out so the caller can stamp it onto the
+  // access token it mints alongside the new refresh token.
+  familyId: string;
 }
 
 /**
@@ -146,7 +149,7 @@ export async function rotateRefreshToken(rawToken: string): Promise<RotationResu
     return next;
   });
 
-  return { userId: existing.userId, token: issued.token };
+  return { userId: existing.userId, token: issued.token, familyId: existing.familyId };
 }
 
 /**
@@ -163,4 +166,79 @@ export async function revokeSession(rawToken: string): Promise<void> {
   // an unauthenticated caller shouldn't be able to probe token validity here.
   if (!existing) return;
   await revokeFamily(prisma, existing.familyId);
+}
+
+export interface SessionSummary {
+  id: string;
+  createdAt: Date;
+  lastActiveAt: Date;
+  expiresAt: Date;
+}
+
+/**
+ * The user's live sessions, newest activity first.
+ *
+ * A session is a rotation family, not a token row: an active session
+ * rewrites its token every fifteen minutes and each rotation leaves the
+ * previous row behind, revoked. Listing rows would show one device as
+ * thirty-odd "sessions". Grouping by family collapses that back into the
+ * thing a person recognises — a browser they signed in on.
+ *
+ * A family counts as live while it still holds one unrevoked, unexpired
+ * token. `lastActiveAt` is when that family last rotated, which is the
+ * closest thing to "last used" available without writing on every request.
+ *
+ * No user agent or IP address is recorded, so the list can't say *which*
+ * browser a session is. Recording those would make the list far more
+ * useful and is worth doing; it is also personal data that nothing else in
+ * this product currently stores, so it is a deliberate decision rather than
+ * an oversight.
+ */
+export async function listSessions(userId: string): Promise<SessionSummary[]> {
+  const now = new Date();
+  // Bounded by the number of sessions a person has open, times the rotations
+  // each has done since the last prune — small enough to group in memory,
+  // and the alternative needs _min/_max aggregates over a grouped set.
+  const tokens = await prisma.refreshToken.findMany({
+    where: { userId },
+    orderBy: { createdAt: "asc" },
+  });
+
+  const families = new Map<string, SessionSummary & { live: boolean }>();
+  for (const token of tokens) {
+    const live = token.revokedAt === null && token.expiresAt > now;
+    const existing = families.get(token.familyId);
+    if (!existing) {
+      families.set(token.familyId, {
+        id: token.familyId,
+        createdAt: token.createdAt,
+        lastActiveAt: token.createdAt,
+        expiresAt: token.expiresAt,
+        live,
+      });
+      continue;
+    }
+    existing.lastActiveAt = token.createdAt;
+    if (live) {
+      existing.live = true;
+      existing.expiresAt = token.expiresAt;
+    }
+  }
+
+  return [...families.values()]
+    .filter((family) => family.live)
+    .sort((a, b) => b.lastActiveAt.getTime() - a.lastActiveAt.getTime())
+    .map(({ live: _live, ...summary }) => summary);
+}
+
+/**
+ * Ends one named session. Returns false when the family isn't this user's,
+ * so the caller can 404 rather than let anyone revoke a session by guessing
+ * a family id.
+ */
+export async function revokeSessionById(userId: string, familyId: string): Promise<boolean> {
+  const owned = await prisma.refreshToken.findFirst({ where: { userId, familyId } });
+  if (!owned) return false;
+  await revokeFamily(prisma, familyId);
+  return true;
 }

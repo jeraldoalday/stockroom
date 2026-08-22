@@ -10,6 +10,16 @@ export interface AccessTokenPayload {
   sub: string; // user id
   organizationId: string;
   role: UserRole;
+  // The refresh-token family this access token was minted from, i.e. the
+  // session. Carried so an authenticated request can tell which of the
+  // user's sessions is the one making it — the Account page needs to label
+  // "this device" in the session list, and nothing else in the request
+  // identifies it.
+  //
+  // Optional because a token issued before this claim existed is still
+  // valid for up to its fifteen minutes; those simply report no session
+  // rather than being rejected.
+  sessionId?: string;
 }
 
 export function hashPassword(plain: string): Promise<string> {

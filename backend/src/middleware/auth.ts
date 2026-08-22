@@ -15,6 +15,9 @@ declare global {
         userId: string;
         organizationId: string;
         role: UserRole;
+        // The session (refresh-token family) this request's access token
+        // came from. Absent on a token minted before the claim existed.
+        sessionId?: string;
       };
     }
   }
@@ -33,6 +36,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
       userId: payload.sub,
       organizationId: payload.organizationId,
       role: payload.role,
+      sessionId: payload.sessionId,
     };
 
     // Every authenticated JSON response is shaped in one place, regardless

@@ -11,8 +11,10 @@ import { hashPassword, signAccessToken, verifyPassword } from "../lib/auth";
 import { rateLimit } from "../lib/rateLimit";
 import {
   issueRefreshToken,
+  listSessions,
   revokeAllForUser,
   revokeSession,
+  revokeSessionById,
   rotateRefreshToken,
 } from "../lib/refreshTokens";
 
@@ -106,12 +108,16 @@ router.post(
       return { organization, user };
     });
 
+    // The refresh token is minted first so its family id can be stamped
+    // onto the access token: that is what lets an authenticated request
+    // identify which session it belongs to.
+    const { token: refreshToken, familyId } = await issueRefreshToken(prisma, user.id);
     const accessToken = signAccessToken({
       sub: user.id,
       organizationId: organization.id,
       role: user.role,
+      sessionId: familyId,
     });
-    const { token: refreshToken } = await issueRefreshToken(prisma, user.id);
 
     res.status(201).json({
       accessToken,
@@ -144,14 +150,15 @@ router.post(
       throw ApiError.unauthorized("Invalid email or password");
     }
 
+    // A fresh login starts a new rotation family, so signing out on one
+    // device doesn't end the session on another.
+    const { token: refreshToken, familyId } = await issueRefreshToken(prisma, user.id);
     const accessToken = signAccessToken({
       sub: user.id,
       organizationId: user.organizationId,
       role: user.role,
+      sessionId: familyId,
     });
-    // A fresh login starts a new rotation family, so signing out on one
-    // device doesn't end the session on another.
-    const { token: refreshToken } = await issueRefreshToken(prisma, user.id);
 
     // A user who simply mistyped their password a few times shouldn't stay
     // throttled once they get it right.
@@ -175,7 +182,7 @@ router.post(
   "/refresh",
   asyncHandler(async (req, res) => {
     const body = refreshSchema.parse(req.body);
-    const { userId, token: refreshToken } = await rotateRefreshToken(body.refreshToken);
+    const { userId, token: refreshToken, familyId } = await rotateRefreshToken(body.refreshToken);
 
     // Role and organization are read fresh rather than taken from the
     // token, so a promotion or demotion takes effect on the next refresh
@@ -189,6 +196,7 @@ router.post(
       sub: user.id,
       organizationId: user.organizationId,
       role: user.role,
+      sessionId: familyId,
     });
 
     res.json({ accessToken, refreshToken });
@@ -207,6 +215,53 @@ router.post(
   asyncHandler(async (req, res) => {
     const body = logoutSchema.parse(req.body);
     await revokeSession(body.refreshToken);
+    res.status(204).send();
+  })
+);
+
+// A user's own sessions. Signing out has always been all-or-nothing: end
+// this browser, or change the password and end everything. Neither helps
+// with the case the whole refresh-token table exists for — "I signed in on
+// a machine at the shop and I'm not there any more" — which needs seeing
+// what is open and ending one of them.
+//
+// Scoped to the caller, not the organization: an Owner cannot list or end a
+// colleague's sessions here. Removing a user is the route for that, and it
+// already revokes their tokens.
+router.get(
+  "/sessions",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const sessions = await listSessions(req.auth!.userId);
+    res.json(
+      sessions.map((session) => ({
+        ...session,
+        // Which row is "this device". Taken from the access token's own
+        // session claim, so it stays correct without the client having to
+        // send its refresh token to a GET endpoint just to be told which
+        // line is itself.
+        current: session.id === req.auth!.sessionId,
+      }))
+    );
+  })
+);
+
+router.delete(
+  "/sessions/:id",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    // Ownership is checked against the caller's own user id, so a family id
+    // guessed or copied from somewhere else is a 404 rather than a way to
+    // sign someone else out.
+    const revoked = await revokeSessionById(req.auth!.userId, req.params.id);
+    if (!revoked) {
+      throw ApiError.notFound("Session not found");
+    }
+    // Ending the current session is allowed: it is the same thing as
+    // signing out, and refusing it would mean a user who can see one line
+    // labelled "this device" is told they may end every session except the
+    // one they can actually see. The client is left holding a dead refresh
+    // token, exactly as it would be after logging out.
     res.status(204).send();
   })
 );

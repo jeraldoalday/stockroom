@@ -35,6 +35,14 @@ function matchesOperators(actual: unknown, operators: Rec): boolean {
   if ("in" in operators && !(operators.in as unknown[]).includes(actual)) return false;
   if ("notIn" in operators && (operators.notIn as unknown[]).includes(actual)) return false;
   if ("not" in operators && actual === operators.not) return false;
+  // A null column never satisfies an ordered comparison in SQL: `NULL <
+  // now()` is NULL, which is not true, so the row is not returned. JS
+  // disagrees loudly — `null < someDate` coerces null to 0 and comes out
+  // true — so every nullable column had to be checked here, or a query like
+  // "reset tokens used before this cutoff" would match every unused token
+  // in the mock and none of them in Postgres.
+  const ordered = ["gt", "gte", "lt", "lte"] as const;
+  if (ordered.some((operator) => operator in operators) && actual == null) return false;
   if ("gt" in operators && !((actual as number) > (operators.gt as number))) return false;
   if ("gte" in operators && !((actual as number) >= (operators.gte as number))) return false;
   if ("lt" in operators && !((actual as number) < (operators.lt as number))) return false;

@@ -180,3 +180,38 @@ describe("aggregate", () => {
     expect(result._sum.quantity).toBeNull();
   });
 });
+
+describe("comparisons against a null column", () => {
+  // `NULL < now()` is NULL in SQL, so the row isn't returned. JS turns the
+  // same expression into `0 < 1755000000000` and returns everything. A
+  // query like "reset tokens spent before this cutoff" would have matched
+  // every unspent token here and none in Postgres.
+  it("does not match a null value with lt", async () => {
+    await prisma.passwordResetToken.create({
+      data: { userId: "u1", tokenHash: "unused", expiresAt: new Date("2027-01-01"), usedAt: null },
+    });
+    await prisma.passwordResetToken.create({
+      data: {
+        userId: "u1",
+        tokenHash: "spent",
+        expiresAt: new Date("2027-01-01"),
+        usedAt: new Date("2026-01-01"),
+      },
+    });
+
+    const found = await prisma.passwordResetToken.findMany({
+      where: { usedAt: { lt: new Date("2026-06-01") } },
+    });
+    expect(found.map((t) => t.tokenHash)).toEqual(["spent"]);
+  });
+
+  it("does not match a null value with gt either", async () => {
+    await prisma.refreshToken.create({
+      data: { userId: "u1", tokenHash: "live", familyId: "f1", expiresAt: new Date("2027-01-01") },
+    });
+    const found = await prisma.refreshToken.findMany({
+      where: { revokedAt: { gt: new Date("2000-01-01") } },
+    });
+    expect(found).toEqual([]);
+  });
+});

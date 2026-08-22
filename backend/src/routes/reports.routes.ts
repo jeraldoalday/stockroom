@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { asyncHandler } from "../lib/asyncHandler";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, requireRole } from "../middleware/auth";
 import { callPythonService } from "../lib/pythonService";
 
 const router = Router();
@@ -80,6 +80,36 @@ router.get(
       organization_id: req.auth!.organizationId,
       ...(query.days ? { days: String(query.days) } : {}),
       ...(query.coverageDays ? { coverage_days: String(query.coverageDays) } : {}),
+    });
+    res.type("application/json").send(result.body);
+  })
+);
+
+const deadStockQuerySchema = z.object({
+  days: z.coerce.number().int().min(7).max(730).optional(),
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+});
+
+// Dead stock: goods on the shelf that nobody has bought inside the window.
+// The product could already say what was about to run out; this is the
+// opposite question, and the one with money attached — stock bought once
+// and sat on since is working capital nobody is looking at, because nothing
+// about it ever moves or raises an alert.
+//
+// Owner-only rather than cost-redacted. Every row is a cost figure and the
+// headline is a cost total, so a Staff view would be an empty table with a
+// blank total — and the response is proxied through as a string, which the
+// role-based redaction (which only shapes objects passed to res.json) never
+// sees anyway.
+router.get(
+  "/dead-stock",
+  requireRole("OWNER"),
+  asyncHandler(async (req, res) => {
+    const query = deadStockQuerySchema.parse(req.query);
+    const result = await callPythonService("/reports/dead-stock", {
+      organization_id: req.auth!.organizationId,
+      ...(query.days ? { days: String(query.days) } : {}),
+      ...(query.limit ? { limit: String(query.limit) } : {}),
     });
     res.type("application/json").send(result.body);
   })

@@ -12,6 +12,7 @@ from sqlalchemy.engine import Connection
 
 from app.config import settings
 from app.db import get_db
+from app.services.dead_stock import fetch_dead_stock
 from app.services.export import fetch_movement_rows, fetch_products_rows, fetch_stock_rows
 from app.services.reorder import fetch_reorder_candidates
 from app.services.reports import fetch_sales_stock_trend
@@ -143,3 +144,60 @@ def reorder_suggestions(
         key=lambda item: item["daysOfStockRemaining"] if item["daysOfStockRemaining"] is not None else float("inf")
     )
     return {"days": days, "coverageDays": coverage_days, "items": items}
+
+
+# Dead stock: what is sitting on the shelf that nobody is buying. The
+# product has always been able to say what is about to run out; this is the
+# opposite question, and for a small shop it is the one with money attached.
+# Owner-only at the Node proxy, because every row carries cost.
+@router.get("/reports/dead-stock", dependencies=[Depends(require_internal_caller)])
+def dead_stock(
+    organization_id: str = Query(...),
+    days: int = Query(default=90, ge=7, le=730),
+    limit: int = Query(default=50, ge=1, le=500),
+    conn: Connection = Depends(get_db),
+) -> dict:
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=days)
+    rows = fetch_dead_stock(conn, organization_id, since)
+
+    items = []
+    for row in rows[:limit]:
+        quantity = int(row["quantity_on_hand"])
+        cost_cents = int(row["cost_cents"])
+        last_sold_at = row["last_sold_at"]
+        days_since_last_sale = None
+        if last_sold_at is not None:
+            # Rows come back timezone-aware from Postgres, but SQLite and a
+            # hand-built test row may not; treating a naive timestamp as UTC
+            # beats raising on the subtraction.
+            reference = last_sold_at if last_sold_at.tzinfo else last_sold_at.replace(tzinfo=timezone.utc)
+            days_since_last_sale = (now - reference).days
+        items.append(
+            {
+                "productId": row["product_id"],
+                "sku": row["sku"],
+                "name": row["name"],
+                "quantityOnHand": quantity,
+                "costCents": cost_cents,
+                # What this row is actually costing: stock on hand valued at
+                # cost, not at the price it is failing to sell for.
+                "tiedUpValueCents": quantity * cost_cents,
+                "lastSoldAt": last_sold_at.isoformat() if last_sold_at is not None else None,
+                "daysSinceLastSale": days_since_last_sale,
+            }
+        )
+
+    return {
+        "days": days,
+        "items": items,
+        "totals": {
+            # Totals cover every dead product, not just the page returned, so
+            # a truncated list still reports the real figure rather than a
+            # reassuring fraction of it.
+            "productCount": len(rows),
+            "tiedUpValueCents": sum(
+                int(row["quantity_on_hand"]) * int(row["cost_cents"]) for row in rows
+            ),
+        },
+    }

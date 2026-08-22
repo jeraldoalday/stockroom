@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
@@ -260,3 +260,131 @@ def test_trend_prefers_the_movements_own_price_over_the_order_line():
 
     sql = str(_TREND_SQL)
     assert 'COALESCE(sm."unitPriceCents", sol."unitPriceCents", 0)' in sql
+
+
+# --- Dead stock -----------------------------------------------------------
+#
+# The report the product was missing: not "what am I about to run out of"
+# but "what have I bought that nobody wants". Every figure here is money on
+# a shelf, so the arithmetic is worth pinning down.
+
+
+def _dead_stock_row(**overrides):
+    row = {
+        "product_id": "prod_1",
+        "sku": "DUST-1",
+        "name": "Dusty Widget",
+        "cost_cents": 250,
+        "quantity_on_hand": 12,
+        "last_sold_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
+        "units_sold_in_window": 0,
+    }
+    row.update(overrides)
+    return row
+
+
+def test_dead_stock_requires_internal_key(monkeypatch):
+    monkeypatch.setattr("app.routers.reports.fetch_dead_stock", lambda conn, organization_id, since: [])
+    res = client.get("/reports/dead-stock", params={"organization_id": "org_1"})
+    assert res.status_code == 401
+
+
+def test_dead_stock_values_stock_at_cost(monkeypatch):
+    monkeypatch.setattr(
+        "app.routers.reports.fetch_dead_stock",
+        lambda conn, organization_id, since: [_dead_stock_row()],
+    )
+    res = client.get("/reports/dead-stock", params={"organization_id": "org_1"}, headers=HEADERS)
+    assert res.status_code == 200
+    body = res.json()
+    item = body["items"][0]
+    assert item["quantityOnHand"] == 12
+    assert item["tiedUpValueCents"] == 12 * 250
+    assert body["totals"]["tiedUpValueCents"] == 12 * 250
+    assert body["totals"]["productCount"] == 1
+
+
+def test_dead_stock_reports_days_since_the_last_sale(monkeypatch):
+    long_ago = datetime.now(timezone.utc) - timedelta(days=200)
+    monkeypatch.setattr(
+        "app.routers.reports.fetch_dead_stock",
+        lambda conn, organization_id, since: [_dead_stock_row(last_sold_at=long_ago)],
+    )
+    res = client.get("/reports/dead-stock", params={"organization_id": "org_1"}, headers=HEADERS)
+    assert res.json()["items"][0]["daysSinceLastSale"] == 200
+
+
+# "Never sold" and "sold once, ages ago" are different situations — one is a
+# buying mistake, the other is a product that has died — so null has to
+# survive rather than being flattened to a number.
+def test_dead_stock_distinguishes_never_sold_from_long_ago(monkeypatch):
+    monkeypatch.setattr(
+        "app.routers.reports.fetch_dead_stock",
+        lambda conn, organization_id, since: [_dead_stock_row(last_sold_at=None)],
+    )
+    item = client.get(
+        "/reports/dead-stock", params={"organization_id": "org_1"}, headers=HEADERS
+    ).json()["items"][0]
+    assert item["lastSoldAt"] is None
+    assert item["daysSinceLastSale"] is None
+
+
+# A timestamp without a timezone would raise on the subtraction against an
+# aware "now" and take the whole report down with it.
+def test_dead_stock_tolerates_a_naive_timestamp(monkeypatch):
+    naive = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+    monkeypatch.setattr(
+        "app.routers.reports.fetch_dead_stock",
+        lambda conn, organization_id, since: [_dead_stock_row(last_sold_at=naive)],
+    )
+    res = client.get("/reports/dead-stock", params={"organization_id": "org_1"}, headers=HEADERS)
+    assert res.status_code == 200
+    assert res.json()["items"][0]["daysSinceLastSale"] == 30
+
+
+# The list is capped so a catalogue full of slow movers can't return
+# thousands of rows, but the headline figure has to describe the whole
+# problem — a total that only covered the page would understate it.
+def test_dead_stock_totals_cover_rows_beyond_the_limit(monkeypatch):
+    rows = [
+        _dead_stock_row(product_id=f"prod_{i}", sku=f"DUST-{i}", quantity_on_hand=2, cost_cents=100)
+        for i in range(5)
+    ]
+    monkeypatch.setattr("app.routers.reports.fetch_dead_stock", lambda conn, organization_id, since: rows)
+
+    body = client.get(
+        "/reports/dead-stock",
+        params={"organization_id": "org_1", "limit": 2},
+        headers=HEADERS,
+    ).json()
+    assert len(body["items"]) == 2
+    assert body["totals"]["productCount"] == 5
+    assert body["totals"]["tiedUpValueCents"] == 5 * 2 * 100
+
+
+def test_dead_stock_passes_the_window_to_the_query(monkeypatch):
+    captured = {}
+
+    def fake(conn, organization_id, since):
+        captured["since"] = since
+        return []
+
+    monkeypatch.setattr("app.routers.reports.fetch_dead_stock", fake)
+    res = client.get(
+        "/reports/dead-stock",
+        params={"organization_id": "org_1", "days": 180},
+        headers=HEADERS,
+    )
+    assert res.status_code == 200
+    assert res.json()["days"] == 180
+    elapsed = datetime.now(timezone.utc) - captured["since"]
+    assert 179 <= elapsed.days <= 180
+
+
+def test_dead_stock_rejects_an_out_of_range_window():
+    res = client.get(
+        "/reports/dead-stock",
+        params={"organization_id": "org_1", "days": 3},
+        headers=HEADERS,
+    )
+    assert res.status_code == 422

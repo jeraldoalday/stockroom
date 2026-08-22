@@ -80,6 +80,95 @@ describe("Dashboard API", () => {
     expect(lowStock.body.items[0].quantity).toBe(4);
   });
 
+  // Stock is summed across locations by a GROUP BY now, so the same product
+  // held in three places has to come back as one figure rather than three
+  // rows fighting over the map key.
+  it("sums a product's stock across every location it is held in", async () => {
+    const token = await signUpAndGetToken("owner3@shop.test", "The Shop");
+    const auth = { Authorization: `Bearer ${token}` };
+
+    const product = await request(app)
+      .post("/api/products")
+      .set(auth)
+      .send({ sku: "SPREAD-1", name: "Spread Widget", costCents: 200, reorderPoint: 5 });
+
+    const back = await request(app).post("/api/locations").set(auth).send({ name: "Back Room" });
+    const van = await request(app).post("/api/locations").set(auth).send({ name: "Van" });
+    const main = await request(app).get("/api/locations").set(auth);
+    const mainId = main.body.find((l: { isDefault: boolean }) => l.isDefault).id;
+
+    for (const [locationId, quantity] of [
+      [mainId, 2],
+      [back.body.id, 3],
+      [van.body.id, 4],
+    ] as [string, number][]) {
+      await request(app)
+        .post("/api/stock-movements")
+        .set(auth)
+        .send({ productId: product.body.id, locationId, type: "RECEIVE", quantity });
+    }
+
+    const summary = await request(app).get("/api/dashboard/summary").set(auth);
+    expect(summary.body.totalStockValueCents).toBe(9 * 200);
+    // Nine on hand against a reorder point of five is healthy; counting a
+    // single location's two units instead would have flagged it.
+    expect(summary.body.lowStockCount).toBe(0);
+
+    const lowStock = await request(app).get("/api/dashboard/low-stock").set(auth);
+    expect(lowStock.body.total).toBe(0);
+  });
+
+  // A product that has never been stocked anywhere has no inventory_items
+  // row at all, so it is absent from the grouped sums entirely rather than
+  // present with a zero. Zero on hand is the definition of low stock, so
+  // missing it is the expensive kind of wrong.
+  it("counts a product with no inventory row at all as low stock", async () => {
+    const token = await signUpAndGetToken("owner4@shop.test", "The Shop");
+    const auth = { Authorization: `Bearer ${token}` };
+
+    await request(app)
+      .post("/api/products")
+      .set(auth)
+      .send({ sku: "NEVER-1", name: "Never Stocked", costCents: 100, reorderPoint: 3 });
+
+    const summary = await request(app).get("/api/dashboard/summary").set(auth);
+    expect(summary.body.lowStockCount).toBe(1);
+    expect(summary.body.totalStockValueCents).toBe(0);
+
+    const lowStock = await request(app).get("/api/dashboard/low-stock").set(auth);
+    expect(lowStock.body.items[0].quantity).toBe(0);
+  });
+
+  // Paging is offset-based, so the sort has to be total: two products on the
+  // same quantity in an unstable order can appear on both pages, or on
+  // neither.
+  it("orders the low-stock list by quantity and breaks ties by name", async () => {
+    const token = await signUpAndGetToken("owner5@shop.test", "The Shop");
+    const auth = { Authorization: `Bearer ${token}` };
+
+    for (const [sku, name] of [
+      ["T-1", "Zephyr"],
+      ["T-2", "Anvil"],
+      ["T-3", "Mallet"],
+    ]) {
+      await request(app)
+        .post("/api/products")
+        .set(auth)
+        .send({ sku, name, costCents: 100, reorderPoint: 2 });
+    }
+
+    const first = await request(app).get("/api/dashboard/low-stock?page=1&pageSize=2").set(auth);
+    const second = await request(app).get("/api/dashboard/low-stock?page=2&pageSize=2").set(auth);
+    expect(first.body.total).toBe(3);
+    expect(first.body.items.map((i: { product: { name: string } }) => i.product.name)).toEqual([
+      "Anvil",
+      "Mallet",
+    ]);
+    expect(second.body.items.map((i: { product: { name: string } }) => i.product.name)).toEqual([
+      "Zephyr",
+    ]);
+  });
+
   it("never mixes stock across organizations", async () => {
     const tokenA = await signUpAndGetToken("ownerA@shop.test", "Shop A");
     const tokenB = await signUpAndGetToken("ownerB@shop.test", "Shop B");

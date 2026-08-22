@@ -73,6 +73,34 @@ async function backdate(sku: string, fixture: Fixture, daysAgo: number) {
   }
 }
 
+// Writes a SALE movement straight to the store, signed as given. The API
+// deliberately refuses to post a sale with a negative quantity, so this is
+// the only way to produce the reversal row the ranking has to cope with.
+async function insertRawSale(fixture: Fixture, sku: string, signedQuantity: number) {
+  await (prisma as unknown as {
+    stockMovement: { create(args: { data: Record<string, unknown> }): Promise<unknown> };
+  }).stockMovement.create({
+    data: {
+      organizationId: (await currentOrganizationId(fixture)),
+      productId: fixture.productIds[sku],
+      locationId: fixture.locationId,
+      type: "SALE",
+      quantity: signedQuantity,
+      actorId: "reversal",
+      createdAt: new Date(),
+    },
+  });
+}
+
+// The org id isn't handed back by any of the fixture calls, so it is read
+// off a movement the fixture already created.
+async function currentOrganizationId(fixture: Fixture): Promise<string> {
+  const [movement] = await (prisma as unknown as {
+    stockMovement: { findMany(args: { where: Record<string, unknown> }): Promise<Record<string, unknown>[]> };
+  }).stockMovement.findMany({ where: { locationId: fixture.locationId } });
+  return movement.organizationId as string;
+}
+
 describe("Dashboard top movers", () => {
   it("requires authentication", async () => {
     const res = await request(app).get("/api/dashboard/top-movers");
@@ -181,6 +209,50 @@ describe("Dashboard top movers", () => {
     const res = await request(app).get("/api/dashboard/top-movers").set(fixture.auth);
     expect(res.body.items).toHaveLength(1);
     expect(res.body.items[0].isActive).toBe(false);
+  });
+
+  // The ranking is produced by a GROUP BY in the database, and a database
+  // is free to return equal groups in any order. Two products that sold the
+  // same number of units must still come back in the same order every time,
+  // or the dashboard shuffles on refresh for no visible reason.
+  it("settles a tie on units sold by name", async () => {
+    const fixture = await setup(["ZZZ", "AAA"]);
+    await sell(fixture, "ZZZ", 7);
+    await sell(fixture, "AAA", 7);
+
+    const res = await request(app).get("/api/dashboard/top-movers").set(fixture.auth);
+    expect(res.body.items.map((item: { sku: string }) => item.sku)).toEqual(["AAA", "ZZZ"]);
+  });
+
+  // A SALE row with a positive quantity is a reversal — the API won't
+  // create one (POST /stock-movements rejects a negative sale outright),
+  // but a correction applied by hand or by a future returns feature will
+  // net a product's sales back to zero. Listing it as a top mover with 0
+  // sold is noise, and a negative count would be worse, so the ranking
+  // drops it. Written straight to the store because no route will do it.
+  it("omits a product whose sales net out to nothing", async () => {
+    const fixture = await setup(["NET-0", "REAL"]);
+    await sell(fixture, "NET-0", 4);
+    await insertRawSale(fixture, "NET-0", 4);
+    await sell(fixture, "REAL", 1);
+
+    const res = await request(app).get("/api/dashboard/top-movers").set(fixture.auth);
+    expect(res.body.items.map((item: { sku: string }) => item.sku)).toEqual(["REAL"]);
+  });
+
+  // The limit is applied to the ranked groups before the products are
+  // looked up, so this also pins that the truncation happens on the right
+  // side of that lookup — take the top 2 of 4 and you must get the two
+  // biggest, not the first two the store happened to return.
+  it("takes the biggest sellers, not the first ones found", async () => {
+    const fixture = await setup(["A", "B", "C", "D"]);
+    await sell(fixture, "A", 1);
+    await sell(fixture, "B", 40);
+    await sell(fixture, "C", 2);
+    await sell(fixture, "D", 30);
+
+    const res = await request(app).get("/api/dashboard/top-movers?limit=2").set(fixture.auth);
+    expect(res.body.items.map((item: { sku: string }) => item.sku)).toEqual(["B", "D"]);
   });
 
   it("does not leak another organization's sales", async () => {

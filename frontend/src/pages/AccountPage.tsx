@@ -1,20 +1,33 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { useConfirmation } from "../components/useConfirmation";
 import { useAuth } from "../context/AuthContext";
-import { changePassword } from "../api/auth";
+import { changePassword, endSession, fetchSessions } from "../api/auth";
+import type { Session } from "../api/auth";
 import { isApiError } from "../api/errors";
 
 // Long enough to read the confirmation, short enough that nobody starts
 // clicking around a session the server has already ended.
 const SIGN_OUT_DELAY_MS = 2500;
 
+function describeError(err: unknown, fallback: string): string {
+  return isApiError(err) ? err.response?.data?.error ?? fallback : fallback;
+}
+
+function formatMoment(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
 export function AccountPage() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [formError, setFormError] = useState<string | null>(null);
+  const [sessionError, setSessionError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
   // Changing a password revokes every session for the user, this one
@@ -40,10 +53,29 @@ export function AccountPage() {
     },
     onError: (err) => {
       setSuccess(false);
-      setFormError(
-        isApiError(err) ? err.response?.data?.error ?? "Could not change password" : "Could not change password"
-      );
+      setFormError(describeError(err, "Could not change password"));
     },
+  });
+
+  const sessionsQuery = useQuery({ queryKey: ["sessions"], queryFn: fetchSessions });
+  const pendingEnd = useConfirmation<Session>();
+
+  const endSessionMutation = useMutation({
+    mutationFn: endSession,
+    onSuccess: (_result, id) => {
+      setSessionError(null);
+      // Ending the session this browser is using leaves it holding a dead
+      // refresh token: the access token keeps working until it expires and
+      // then every request fails. That is signing out, so do it properly
+      // rather than waiting for the app to break in fifteen minutes.
+      if (sessionsQuery.data?.find((session) => session.id === id)?.current) {
+        logout();
+        navigate("/login", { replace: true });
+        return;
+      }
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+    onError: (err) => setSessionError(describeError(err, "Could not end that session")),
   });
 
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
@@ -126,6 +158,78 @@ export function AccountPage() {
           </button>
         </div>
       </form>
+
+      <h2 className="mb-1 mt-8 text-lg font-medium text-gray-900">Signed-in devices</h2>
+      <p className="mb-3 max-w-2xl text-sm text-gray-500">
+        Every browser you have signed in from stays signed in for up to seven days. End a session
+        to sign that device out immediately — useful if you have signed in somewhere you no longer
+        have to hand.
+      </p>
+
+      {sessionError && <div className="mb-3 text-sm text-red-600">{sessionError}</div>}
+
+      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+        {sessionsQuery.isLoading && <div className="p-4 text-sm text-gray-500">Loading sessions...</div>}
+        {sessionsQuery.isError && (
+          <div className="p-4 text-sm text-red-600">Could not load your sessions.</div>
+        )}
+        {sessionsQuery.data && sessionsQuery.data.length === 0 && (
+          <div className="p-4 text-sm text-gray-500">No other sessions.</div>
+        )}
+        {sessionsQuery.data && sessionsQuery.data.length > 0 && (
+          <table className="min-w-full divide-y divide-gray-200 text-sm">
+            <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
+              <tr>
+                <th className="px-4 py-2">Signed in</th>
+                <th className="px-4 py-2">Last active</th>
+                <th className="px-4 py-2">Expires</th>
+                <th className="px-4 py-2" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {sessionsQuery.data.map((session) => (
+                <tr key={session.id}>
+                  <td className="px-4 py-2 text-gray-900">
+                    {formatMoment(session.createdAt)}
+                    {session.current && (
+                      <span className="ml-2 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">
+                        This device
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-gray-500">{formatMoment(session.lastActiveAt)}</td>
+                  <td className="px-4 py-2 text-gray-500">{formatMoment(session.expiresAt)}</td>
+                  <td className="px-4 py-2 text-right">
+                    <button
+                      type="button"
+                      onClick={() => pendingEnd.request(session)}
+                      className="text-sm font-medium text-red-600 hover:text-red-700"
+                    >
+                      {session.current ? "Sign out" : "End session"}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <ConfirmDialog
+        open={pendingEnd.isOpen}
+        title={pendingEnd.target?.current ? "Sign out of this device?" : "End this session?"}
+        description={
+          pendingEnd.target?.current
+            ? "You will be returned to the sign-in page."
+            : `That device will be signed out immediately. It was last active on ${
+                pendingEnd.target ? formatMoment(pendingEnd.target.lastActiveAt) : ""
+              }.`
+        }
+        confirmLabel={pendingEnd.target?.current ? "Sign out" : "End session"}
+        busy={endSessionMutation.isPending}
+        onCancel={pendingEnd.cancel}
+        onConfirm={() => pendingEnd.confirm((session) => endSessionMutation.mutate(session.id))}
+      />
     </AppShell>
   );
 }

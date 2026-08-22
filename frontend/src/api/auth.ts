@@ -39,3 +39,22 @@ export async function forgotPassword(email: string): Promise<void> {
 export async function resetPassword(token: string, newPassword: string): Promise<void> {
   await apiClient.post("/auth/reset-password", { token, newPassword });
 }
+
+/** One live sign-in: a browser or device with a working refresh token. */
+export interface Session {
+  id: string;
+  createdAt: string;
+  lastActiveAt: string;
+  expiresAt: string;
+  /** True for the session this browser is making the request from. */
+  current: boolean;
+}
+
+export async function fetchSessions(): Promise<Session[]> {
+  const res = await apiClient.get<Session[]>("/auth/sessions");
+  return res.data;
+}
+
+export async function endSession(id: string): Promise<void> {
+  await apiClient.delete(`/auth/sessions/${id}`);
+}

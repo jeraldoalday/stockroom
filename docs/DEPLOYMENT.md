@@ -35,6 +35,7 @@ as the database.
 | `JWT_REFRESH_SECRET` | yes | **Must differ from the access secret.** They are separate keys so that a leaked access secret can't be used to mint 7-day refresh tokens. |
 | `JWT_ACCESS_TTL` | no (`15m`) | Short by design; the frontend refreshes transparently. |
 | `JWT_REFRESH_TTL` | no (`7d`) | How long a signed-out-of-nowhere session lasts. |
+| `TOKEN_PRUNE_INTERVAL_MS` | no (`3600000`) | How often the API sweeps expired refresh and reset token rows. Per process, so with more than one instance run `npm run prune:tokens` from cron instead. |
 | `PORT` | no (`4000`) | |
 | `CORS_ORIGIN` | yes in production | The exact frontend origin. The default is `http://localhost:5173`; leaving it there in production means the browser blocks every request. |
 | `PYTHON_SERVICE_URL` | yes | Private address of the reports service. |
@@ -154,21 +155,28 @@ add a second instance.
   minutes by default) to be fully effective. That window is the reason to
   keep the TTL short; shortening it further trades refresh traffic for a
   smaller exposure.
-- **The refresh token table is never pruned.** Rotation writes a row per
-  refresh, so an active session accumulates roughly one row per 15 minutes.
-  Nothing deletes expired or revoked rows yet — schedule a periodic
-  `DELETE FROM refresh_tokens WHERE "expiresAt" < now()` before this runs
-  for any length of time.
-- **No password reset and no email.** There is no SMTP or provider
-  configuration anywhere in the stack. Adding a staff member means an Owner
-  choosing a temporary password and telling them directly. A user who
-  forgets their password needs an Owner or a database change.
-- **Dashboard aggregates run in application code.** `/api/dashboard/summary`
-  and `/top-movers` fetch rows and sum them in JavaScript rather than using
-  SQL aggregates, because the in-memory test client has no `groupBy`. The
-  NFR target is 10k SKUs and this is fine there; past that, move them to
-  SQL before adding more instances, because each instance is doing the whole
-  computation.
+- **Token pruning is per-process.** Expired refresh and password-reset rows
+  are deleted on a timer inside each API process
+  (`TOKEN_PRUNE_INTERVAL_MS`), so two instances both sweep — harmless, but
+  wasteful, and it is the same single-instance assumption the rate limiter
+  makes. Behind a load balancer, set the interval high or disable it and run
+  `npm run prune:tokens` from cron instead. Note what the sweep deliberately
+  keeps: a revoked refresh token that has not yet expired is the
+  reuse detector, and deleting those early would turn a replayed token into
+  an ordinary 401 with the rest of the attacker's family still working.
+- **No email provider.** Forgot-password works end to end against a
+  pluggable `EmailSender`, but the shipped implementation logs the reset
+  link to the server console instead of sending it — so in production a user
+  who forgets their password still needs an Owner or a database change, and
+  adding a staff member still means an Owner choosing a temporary password
+  and telling them directly.
+- **The low-stock comparison still runs in application code.** The sums
+  behind `/api/dashboard/summary` and `/top-movers` are now GROUP BY queries,
+  but deciding which products are below their reorder point is a predicate
+  across two tables that Prisma's query builder can't express, so every
+  active product is still listed to make the comparison. Fine at the 10k-SKU
+  NFR target; past that it wants a raw SQL query, whose shape is written
+  down in a comment in `dashboard.routes.ts`.
 - **No structured logging, metrics or error reporting.** Errors go to
   `console.error` and unhandled 500s carry no request id, so a production
   failure is only diagnosable if you happen to be tailing the logs.

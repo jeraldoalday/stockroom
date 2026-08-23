@@ -43,11 +43,13 @@ Northside Grocery, a small shop with 60 days of trading behind it:
 
 - 3 locations (Storefront, Back Room, Overflow Warehouse), 6 categories,
   26 products, 4 suppliers, 5 customers
-- 1,622 stock movements — 1,417 sales, 194 receipts, 11 adjustments
+- 1,637 stock movements — 1,422 sales, 196 receipts, 19 adjustments
 - 4 purchase orders, one in each status; 4 sales orders covering draft,
   fulfilled and cancelled
-- $2,686.00 of stock on hand at cost
-- 4 products at or below their reorder point, 20 comfortably stocked
+- $2,735.05 of stock on hand at cost
+- 4 products at or below their reorder point, 22 comfortably stocked; two of
+  those 22 have never sold a single unit, which is what the dead-stock
+  report is for
 
 ## The walkthrough
 
@@ -57,17 +59,17 @@ Sign in as **owner@northside.test**.
 
 Three stat cards, then two panels:
 
-- **Total stock value $2,686.00** — quantity on hand × cost, across every
+- **Total stock value $2,735.05** — quantity on hand × cost, across every
   location. This card is the one Staff never see.
 - **Low stock (4)** — the panel below lists them, lowest first: Mature
-  Cheddar 400g, Ground Coffee 500g and Mixed Nuts 300g are at zero;
-  Laundry Powder 2kg is at 5 against a reorder point of 6.
-- **Top movers, last 30 days** — Butter Croissant (281 units), Bananas
-  (267), Avocado (255), Whole Milk (229), Salted Crisps (183).
+  Cheddar 400g, Ground Coffee 500g, Laundry Powder 2kg and Mixed Nuts 300g
+  have all run to zero.
+- **Top movers, last 30 days** — Butter Croissant (288 units), Bananas
+  (286), Avocado (257), Free Range Eggs (204), Whole Milk (200).
 
 The point to make: the first two panels are problems, the third is what's
 working. Together they're the argument for setting a reorder point at all —
-a croissant selling 281 units a month is worth never running out of.
+a croissant selling 288 units a month is worth never running out of.
 
 ### 2. Stock movements — the audit trail (F4, F5) (2 min)
 
@@ -108,14 +110,14 @@ The **Corner Street Bakery** order is still a draft: it has no effect on
 stock at all until it's marked as ordered and received. That distinction is
 what makes "stock on order" different from "stock on hand".
 
-### 4. Reports — the Python service (F10, F11, F12) (2 min)
+### 4. Reports — the Python service (F10, F11, F12, F13) (2 min)
 
 Go to **Reports**. Everything here is computed by the FastAPI service
 reading the same database, proxied through the Node API — the browser never
 talks to it directly.
 
 - **7 / 30-day trend** — units sold vs received per day, with revenue. Over
-  30 days: 3,377 units and $12,868.82. The weekly rhythm is visible —
+  30 days: 3,401 units and $12,944.85. The weekly rhythm is visible —
   weekends materially heavier than midweek. Every seeded sale carries the
   price it went out at, which is what makes the revenue line real rather
   than flat zero.
@@ -124,6 +126,11 @@ talks to it directly.
   demand over a 14-day coverage target, floored at the product's own
   reorder quantity so a suggestion never undercuts what the owner already
   decided.
+- **Dead stock** — the mirror image of the reorder report, and the one that
+  usually lands: Novelty Gift Hamper and Sugar-Free Liquorice, $253.20 of
+  stock that has never sold a unit. Reorder suggestions say what to buy;
+  this says what not to buy again. Owner-only, because every column on it
+  is a cost figure.
 - **Export CSV** — products, stock or movements. Worth opening the products
   export in a spreadsheet; it's the same column set the importer accepts,
   which is the "switching from spreadsheets is painless" claim in PRD
@@ -181,7 +188,15 @@ and it's the one worth demonstrating rather than asserting.
   disappear from the catalogue, then find it under the **Archived** tab and
   restore it. Try archiving something on an open purchase order and the API
   refuses, because receiving against it would resurrect stock under a SKU
-  no list shows.
+  no list shows. Locations, suppliers and customers archive the same way —
+  archive the Overflow Warehouse (it is empty) and watch it drop out of
+  every location picker on the movements and orders screens.
+- **Signed-in devices.** On **Account**, the session list shows every
+  browser signed into that account, with the one you are using labelled.
+  Sign in from a private window, refresh the list, and end that session
+  from here — the private window is signed out on its next request. This is
+  the answer to "I signed in on the machine at the shop and I'm not there
+  any more", which until now needed a password change to fix.
 
 ## Intentionally out of scope for this demo
 
@@ -200,5 +215,6 @@ console instead of sending it, and invites are still an Owner-set temporary
 password. Signing out and any password change now revoke the session
 server-side, though an already-issued access token stays valid for up to
 15 minutes. Rate limiting is per-process and weakens behind a load
-balancer. The refresh token table isn't pruned yet, so it grows a row
-per refresh.
+balancer. Expired token rows are now swept on a timer inside the API
+process, which is one more thing that wants moving out of the process
+before there is a second one.

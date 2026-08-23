@@ -1125,3 +1125,157 @@ prevent — check for orphans before running it against real data.
 5. Smaller: archive/restore for locations, matching products, suppliers and
    customers; a per-session list on the Account page now that sessions are
    real records, so a user can see and end them individually.
+
+## Day 18 (post-MVP) — 2026-08-23
+
+**Planned:** the "Next" list left at the end of Day 17 — prune the refresh
+token table, move the dashboard aggregates into SQL, archive/restore for
+locations, and a per-session list on the Account page.
+
+**Shipped — token pruning (Next item 2):**
+
+- Nothing had ever deleted a token row. Rotation writes one on every
+  refresh, so an active session leaves about four rows an hour behind, all
+  but one revoked, and the table sits on the hot path of every refresh
+  behind a unique index on `tokenHash`. Password reset tokens accumulated
+  the same way, one per request.
+- The sweep runs on a timer inside the API process
+  (`TOKEN_PRUNE_INTERVAL_MS`, hourly) and is also `npm run prune:tokens` for
+  a cron job. Deliberately not on a request: sweeping at login would put a
+  table-wide delete in front of someone waiting to sign in and would work
+  hardest exactly when the API is busiest.
+- What it does not delete is the interesting half. A revoked refresh token
+  that has not yet expired is the reuse detector — presenting one means a
+  token that was already exchanged is being replayed, and the answer is to
+  revoke the whole family. Delete it early and that replay reads as an
+  unknown token: a plain 401, with the rest of the thief's family still
+  working. Expired rows are safe because the JWT signature check rejects
+  them before the row is read at all, and an hour of grace on top keeps a
+  clock skew between API and database from deleting a live token.
+
+**Shipped — sessions a user can see and end (Next item 5):**
+
+- `GET /api/auth/sessions` and `DELETE /api/auth/sessions/:id`, plus a
+  panel on the Account page. Signing out was all-or-nothing — this browser,
+  or everything via a password change — and neither answers the case the
+  whole refresh-token table exists for: "I signed in on the machine at the
+  shop and I'm not there any more".
+- A session is a rotation family, not a token row. An active session
+  rewrites its token every fifteen minutes, so listing rows would show one
+  browser as thirty-odd sessions.
+- Access tokens now carry the family they were minted from, which is how the
+  list labels the row that is asking. Tokens issued before the claim existed
+  stay valid and simply report no current session for their last few
+  minutes.
+- Scoped to the caller's own user: an Owner cannot list or end a colleague's
+  sessions here, and a family id learned elsewhere gets a 404 rather than
+  the power to sign that person out. Ending the current session is allowed
+  and signs the browser out properly — refusing it would mean the one row a
+  user can definitely identify is the one row they may not end.
+
+**Shipped — dashboard aggregates in SQL (Next item 3):**
+
+- Every dashboard load read the whole `inventory_items` table for the org:
+  one row per product *per location*, so the NFR ceiling of 10k SKUs across
+  5 locations was 50,000 rows fetched to produce three numbers. Top movers
+  read every SALE movement in the window — ~1,400 in the seeded demo — to
+  return five rows.
+- Both are `GROUP BY` now. Inventory returns one row per product regardless
+  of location count; top movers returns one row per product sold, already
+  ranked, so the limit applies before the products are looked up and only
+  the five that made the cut are read.
+- Still in application code: the low-stock *comparison*, which is a
+  predicate across products and inventory that Prisma's query builder can't
+  express. The raw SQL shape that would fix it is written down in a comment
+  rather than guessed at now.
+
+**Shipped — location archive/restore (Next item 5):**
+
+- Removing a location was refused once it had any movement history or any
+  sales order pointing at it, which is every location that has ever been
+  used. Same dead end suppliers and customers were in on Day 17, same
+  answer: `DELETE` archives, `/restore` returns it, the list takes
+  `?status=`.
+- A location differs from a supplier in one way that matters: it is a
+  physical place, so an archived one is also refused for new stock across
+  all four write paths (movements, transfers either direction, PO receipts,
+  sales orders). Stock booked into somewhere hidden from every picker would
+  count towards the valuation while appearing in no list, and with transfers
+  out refused too it would be stranded until someone restored the location.
+  Hence the rule that a location must be emptied before archiving, with an
+  error that says exactly that.
+
+**Also shipped — the dead-stock report (new, F13):**
+
+Not on the list, but it kept suggesting itself while the aggregates were
+being rewritten. The product could say what was about to run out — low
+stock, reorder suggestions, top movers — and had no answer at all for the
+opposite question. For a small shop that is the one with money attached:
+stock bought once and sat on since is working capital on a shelf, invisible
+precisely because nothing about it ever moves or raises an alert.
+
+`GET /api/reports/dead-stock` (FastAPI, one SQL query) lists active products
+holding stock with no sales in the window, ordered by the capital each is
+tying up. "Never sold" stays distinct from "sold once, eight months ago" —
+a buying mistake versus a product that has died. The list is capped but the
+totals count every dead product, since a total describing only the rows on
+screen would understate the exact figure the report exists to show.
+Owner-only rather than cost-redacted: every column is a cost figure, and the
+response is proxied as a string, which the role-based redaction never sees.
+
+**Maintenance and bugs found on the way:**
+
+- `package.json` had two top-level `prisma` keys. Every parser keeps the
+  last, so nothing broke — the file was one edit away from someone changing
+  the block that gets discarded.
+- The in-memory Prisma test double ignored `orderBy` outright. Twelve routes
+  ask for one, so every test asserting "newest first" was asserting
+  insertion order, and a route that lost its `orderBy` would have gone on
+  passing. It now sorts, and has `groupBy`/`aggregate` so an endpoint can
+  move off "fetch everything and add it up" without giving up its coverage.
+- The same double matched `NULL` in ordered comparisons, because JS reads
+  `null < someDate` as `0 < 1755000000000` where SQL returns NULL. Harmless
+  until a query needed `usedAt: { lt: cutoff }`, where it is the entire
+  meaning: every unused reset token would have been pruned as spent.
+- Two ordering bugs surfaced by moving to `GROUP BY`, which may return equal
+  groups in any order. Top movers now settles ties by name; the low-stock
+  list did the same on quantity, where it mattered more — the list is paged
+  by offset, so an unstable sort could show one product on two pages and
+  another on neither.
+- The frontend passed `fetchLocations` straight to `useQuery` as the query
+  function, which hands it TanStack's query context as the first argument.
+  Harmless while the function took no arguments; a 400 the moment it took a
+  status filter.
+- The seeded demo sold every SKU it stocked, so the new dead-stock report
+  opened on an empty table — a live demonstration of the problem it exists
+  to find, exactly the trap the low-stock panel fell into before the
+  simulation learned to run some products down. Two zero-demand products
+  fix it, both expensive per unit, because dead stock is interesting in
+  proportion to the capital it holds.
+
+**Verified:** backend typecheck, lint, 295 tests (up from 231);
+python-service 40 tests (up from 32); frontend lint and build. All clean.
+
+Still not verified against a real Postgres or a browser — no database is
+available on this machine. One more hand-written migration landed today
+(`locations.isActive`), and the demo figures quoted in `docs/DEMO.md` were
+recomputed from the seed simulation rather than from a seeded database.
+
+**Next:**
+
+1. **Transactional email.** Unchanged as the top item, and now the only
+   thing left on the Day 14 sign-off list that is squarely a gap rather than
+   a trade-off: forgot-password works end to end but the shipped sender logs
+   to the console, and invites are still an Owner-set temporary password.
+2. **Shared-state rate limiting**, required before a second API instance —
+   and it now has company, since the token pruner makes the same
+   single-process assumption.
+3. **Raw SQL for the low-stock predicate**, the one part of the dashboard
+   still reading every active product.
+4. **Recording a user agent against a session**, so the Account page can say
+   which browser a session is rather than only when it started. It is
+   personal data nothing else here stores, so it is a decision to make
+   deliberately rather than a gap to close.
+5. Smaller: archive/restore for categories, the last list still
+   hard-deleting; a "dead stock" CSV export, since the report is exactly the
+   thing an owner would want to take to a supplier.

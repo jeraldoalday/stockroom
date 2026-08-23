@@ -78,8 +78,10 @@ by `organizationId` at the middleware layer, never trusted from the client.
 | F10 | CSV import (products) and CSV export (products, stock, movements) | P1 | Shipped (day 10) |
 | F11 | Basic sales/stock report (Python service) with 7/30-day trend | P1 | Shipped (day 11) |
 | F12 | Simple reorder-quantity suggestion (moving-average demand) | P2 | Shipped (day 12) |
+| F13 | Dead-stock report: products holding stock that isn't selling, valued at cost | P2 | Shipped (day 18) |
 
-All twelve are implemented end to end (API, UI, and tests). "Top movers"
+All twelve MVP requirements are implemented end to end (API, UI, and tests);
+F13 is a post-v1 addition rather than part of that scope. "Top movers"
 appears in section 3, goal 5 but was missing from the F9 row above until
 day 14; the row now reflects what F9 was always meant to include.
 
@@ -201,8 +203,12 @@ blocking for a design-partner pilot:
   went out at, and the trend report prefers it over the order line.
   Movements written before that column existed still have no price of their
   own and continue to fall back to the line.
-- **Dashboard aggregates are computed in application code**, not SQL.
-  Within the 10k SKU target in §7; a blocker beyond it.
+- ~~**Dashboard aggregates are computed in application code**, not SQL.~~
+  **Resolved (Day 18):** the sums are GROUP BY queries. What is left in
+  application code is the low-stock *comparison* — a predicate across
+  products and inventory that Prisma's query builder can't express — so
+  every active product is still listed to make it. Within the 10k SKU
+  target in §7.
 - **The read-only DB role for the Python service** is provisioned
   automatically in local dev (`db/init/01-create-readonly-role.sql`); a
   production deploy still has to create it, using

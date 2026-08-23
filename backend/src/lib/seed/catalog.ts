@@ -65,7 +65,19 @@ export const SEED_PRODUCTS: SeedProduct[] = [
   { sku: "NG-6001", name: "Salted Crisps 150g", category: "Snacks", costCents: 110, priceCents: 249, reorderPoint: 18, reorderQty: 48, dailyDemand: 6 },
   { sku: "NG-6002", name: "Dark Chocolate 100g", category: "Snacks", costCents: 175, priceCents: 379, reorderPoint: 14, reorderQty: 40, dailyDemand: 4 },
   { sku: "NG-6003", name: "Mixed Nuts 300g", category: "Snacks", costCents: 395, priceCents: 699, reorderPoint: 8, reorderQty: 24, dailyDemand: 2 },
+  // Two lines nobody buys, with `dailyDemand: 0` so the simulation receives
+  // them and then never sells one. Every other product in this catalogue
+  // moves, which left the dead-stock report empty in the demo — a live
+  // demonstration of the problem it exists to find. Both are deliberately
+  // expensive per unit: dead stock is interesting in proportion to the
+  // capital it holds, and a shop's worst offender is usually something
+  // pricey that seemed like a good idea once.
+  { sku: "NG-5005", name: "Novelty Gift Hamper", category: "Household", costCents: 1450, priceCents: 2499, reorderPoint: 2, reorderQty: 6, dailyDemand: 0 },
+  { sku: "NG-6004", name: "Sugar-Free Liquorice 200g", category: "Snacks", costCents: 220, priceCents: 449, reorderPoint: 6, reorderQty: 12, dailyDemand: 0 },
 ];
+
+/** SKUs the simulation never sells — see the comment above them. */
+export const DEAD_STOCK_SKUS = ["NG-5005", "NG-6004"];
 
 export interface SeedSupplier {
   name: string;

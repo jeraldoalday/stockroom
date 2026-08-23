@@ -42,7 +42,7 @@ database holding other data.
 Northside Grocery, a small shop with 60 days of trading behind it:
 
 - 3 locations (Storefront, Back Room, Overflow Warehouse), 6 categories,
-  24 products, 4 suppliers, 5 customers
+  26 products, 4 suppliers, 5 customers
 - 1,622 stock movements — 1,417 sales, 194 receipts, 11 adjustments
 - 4 purchase orders, one in each status; 4 sales orders covering draft,
   fulfilled and cancelled

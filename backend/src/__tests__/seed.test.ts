@@ -3,6 +3,7 @@ jest.mock("../lib/prisma");
 import { prisma } from "../lib/prisma";
 import { resetPrismaMock } from "./testUtils/prismaMock";
 import {
+  DEAD_STOCK_SKUS,
   DEMO_ORGANIZATION_NAME,
   DEMO_OWNER_EMAIL,
   DEMO_STAFF_EMAIL,
@@ -120,6 +121,31 @@ describe("planHistory", () => {
     // as low if every location is low — including the back room.
     for (const product of low) {
       expect(runningLowSkus()).toContain(product.sku);
+    }
+  });
+
+  // The dead-stock report (Day 18) has the same failure mode as the
+  // low-stock panel: it shows nothing at all unless the data contains a
+  // product that holds stock and never sells. Every SKU in the catalogue
+  // moved, so the demo would have opened that screen on an empty table —
+  // a live demonstration of the problem the report exists to find.
+  it("leaves some products holding stock they never sell", () => {
+    const { movements, quantities } = planHistory({ days: 60 });
+
+    const soldSkus = new Set(
+      movements.filter((movement) => movement.type === "SALE").map((movement) => movement.sku)
+    );
+
+    for (const sku of DEAD_STOCK_SKUS) {
+      expect(soldSkus.has(sku)).toBe(false);
+
+      const onHand = [...quantities.entries()]
+        .filter(([key]) => key.startsWith(`${sku}::`))
+        .reduce((total, [, quantity]) => total + quantity, 0);
+      // Stock on hand is what makes a product dead rather than merely
+      // discontinued: with none left it ties up nothing and the report
+      // rightly ignores it.
+      expect(onHand).toBeGreaterThan(0);
     }
   });
 

@@ -54,7 +54,7 @@ uvicorn app.main:app --reload --port 8000
 
 ## Demo data
 
-`cd backend && npm run seed` creates "Northside Grocery" — 24 products, 3
+`cd backend && npm run seed` creates "Northside Grocery" — 26 products, 3
 locations, 60 days of stock movements, and purchase/sales orders in every
 status. Sign in as `owner@northside.test` or `clerk@northside.test`,
 password `stockroom123`. See [`docs/DEMO.md`](docs/DEMO.md).

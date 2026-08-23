@@ -1,9 +1,15 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
-import { downloadExport, fetchReorderSuggestions, fetchTrend } from "../api/reports";
+import { downloadExport, fetchDeadStock, fetchReorderSuggestions, fetchTrend } from "../api/reports";
 import type { ExportKind } from "../api/reports";
 import { isApiError } from "../api/errors";
+import { useAuth } from "../context/AuthContext";
+
+// Windows offered for the dead-stock report. Ninety days is the default: a
+// month is short enough that ordinary seasonal stock looks dead, and a year
+// is long enough that almost nothing does.
+const DEAD_STOCK_WINDOWS = [30, 90, 180, 365];
 
 function formatCents(cents: number): string {
   return (cents / 100).toLocaleString(undefined, { style: "currency", currency: "USD" });
@@ -16,12 +22,22 @@ const EXPORT_LABELS: Record<ExportKind, string> = {
 };
 
 export function ReportsPage() {
+  const { user } = useAuth();
+  const isOwner = user?.role === "OWNER";
   const [days, setDays] = useState<7 | 30>(7);
+  const [deadStockDays, setDeadStockDays] = useState(90);
   const [exportingKind, setExportingKind] = useState<ExportKind | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
 
   const trendQuery = useQuery({ queryKey: ["reports", "trend", days], queryFn: () => fetchTrend(days) });
   const reorderQuery = useQuery({ queryKey: ["reports", "reorder-suggestions"], queryFn: fetchReorderSuggestions });
+  const deadStockQuery = useQuery({
+    queryKey: ["reports", "dead-stock", deadStockDays],
+    queryFn: () => fetchDeadStock(deadStockDays),
+    // The endpoint is Owner-only, so asking as Staff would spend a request
+    // to be told 403 and show an error for a panel that isn't rendered.
+    enabled: isOwner,
+  });
 
   const maxUnits = Math.max(1, ...(trendQuery.data?.series.map((p) => Math.max(p.unitsSold, p.unitsReceived)) ?? [1]));
 
@@ -147,6 +163,89 @@ export function ReportsPage() {
           </div>
         )}
       </div>
+
+      {isOwner && (
+        <div className="mt-6 rounded-lg border border-gray-200 bg-white p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Dead stock</h2>
+              <p className="mt-1 max-w-2xl text-sm text-gray-500">
+                Products still holding stock that hasn't sold in {deadStockDays} days, and what
+                each one is tying up at cost. The reorder report says what to buy; this one says
+                what not to buy again.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              {DEAD_STOCK_WINDOWS.map((window) => (
+                <button
+                  key={window}
+                  type="button"
+                  onClick={() => setDeadStockDays(window)}
+                  className={`rounded-md px-3 py-1.5 text-sm font-medium ${
+                    deadStockDays === window
+                      ? "bg-brand-600 text-white"
+                      : "border border-gray-300 text-gray-700"
+                  }`}
+                >
+                  {window}d
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {deadStockQuery.isLoading && <p className="mt-3 text-sm text-gray-500">Loading...</p>}
+          {deadStockQuery.isError && (
+            <p className="mt-3 text-sm text-red-600">Failed to load the dead-stock report.</p>
+          )}
+          {deadStockQuery.data?.items.length === 0 && (
+            <p className="mt-3 text-sm text-gray-500">
+              Everything on the shelf has sold at least once in the last {deadStockDays} days.
+            </p>
+          )}
+          {deadStockQuery.data && deadStockQuery.data.items.length > 0 && (
+            <>
+              <div className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                <strong>{formatCents(deadStockQuery.data.totals.tiedUpValueCents)}</strong> tied up
+                across {deadStockQuery.data.totals.productCount} product
+                {deadStockQuery.data.totals.productCount === 1 ? "" : "s"}.
+              </div>
+              <div className="mt-3 overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-gray-500">
+                      <th className="py-1.5 pr-4">Product</th>
+                      <th className="py-1.5 pr-4">On hand</th>
+                      <th className="py-1.5 pr-4">Tied up (at cost)</th>
+                      <th className="py-1.5 pr-4">Last sold</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {deadStockQuery.data.items.map((item) => (
+                      <tr key={item.productId} className="border-t border-gray-100">
+                        <td className="py-1.5 pr-4 text-gray-900">
+                          {item.name} <span className="text-gray-400">({item.sku})</span>
+                        </td>
+                        <td className="py-1.5 pr-4 text-gray-700">{item.quantityOnHand}</td>
+                        <td className="py-1.5 pr-4 font-medium text-gray-900">
+                          {formatCents(item.tiedUpValueCents)}
+                        </td>
+                        <td className="py-1.5 pr-4 text-gray-700">
+                          {/* "Never sold" is a different problem from "sold once, ages ago" —
+                              a buying mistake rather than a product that has died — so it is
+                              said in words rather than shown as a blank. */}
+                          {item.daysSinceLastSale === null
+                            ? "Never sold"
+                            : `${item.daysSinceLastSale} days ago`}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       <div className="mt-6 rounded-lg border border-gray-200 bg-white p-4">
         <h2 className="text-lg font-semibold text-gray-900">Export CSV</h2>

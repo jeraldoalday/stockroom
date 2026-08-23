@@ -47,6 +47,31 @@ export async function fetchReorderSuggestions(): Promise<ReorderSuggestionsRespo
   return res.data;
 }
 
+export interface DeadStockItem {
+  productId: string;
+  sku: string;
+  name: string;
+  quantityOnHand: number;
+  costCents: number;
+  tiedUpValueCents: number;
+  /** Null when the product has never sold at all. */
+  lastSoldAt: string | null;
+  daysSinceLastSale: number | null;
+}
+
+export interface DeadStockResponse {
+  days: number;
+  items: DeadStockItem[];
+  totals: { productCount: number; tiedUpValueCents: number };
+}
+
+// Owner-only server-side: every column is a cost figure, so there is no
+// meaningful Staff view of this report.
+export async function fetchDeadStock(days: number): Promise<DeadStockResponse> {
+  const res = await apiClient.get<DeadStockResponse>("/reports/dead-stock", { params: { days } });
+  return res.data;
+}
+
 export type ExportKind = "products" | "stock" | "movements";
 
 // Downloads share the same axios instance (and its auth interceptor) as

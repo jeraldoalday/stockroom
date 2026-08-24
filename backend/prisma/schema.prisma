@@ -122,6 +122,13 @@ model RefreshToken {
   // Set when this token is rotated, so a replay can be traced to the token
   // that superseded it when reading the table by hand.
   replacedById String?
+  // The client's User-Agent header at issuance, so the Account page's
+  // session list can say *which* browser a session is rather than only
+  // when it started. Deliberately not IP address alongside it — that's a
+  // more precise, more sensitive signal than this feature needs. Null for
+  // any token issued before this column existed, and for a caller that
+  // sent no header at all.
+  userAgent    String?
   createdAt    DateTime  @default(now())
 
   @@index([userId])

@@ -19,6 +19,7 @@ interface Session {
   lastActiveAt: string;
   expiresAt: string;
   current: boolean;
+  userAgent: string | null;
 }
 
 async function signUp() {
@@ -55,6 +56,44 @@ describe("GET /api/auth/sessions", () => {
     const sessions = await listSessions(accessToken);
     expect(sessions).toHaveLength(1);
     expect(sessions[0].current).toBe(true);
+  });
+
+  it("records the signing-in client's User-Agent", async () => {
+    const signup = await request(app)
+      .post("/api/auth/signup")
+      .set("User-Agent", "TestBrowser/1.0")
+      .send({ organizationName: "The Shop", name: "Owner", ...CREDENTIALS });
+
+    const sessions = await listSessions(signup.body.accessToken);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].userAgent).toBe("TestBrowser/1.0");
+  });
+
+  it("records no User-Agent when the client sends none", async () => {
+    const signup = await request(app)
+      .post("/api/auth/signup")
+      .unset("User-Agent")
+      .send({ organizationName: "The Shop", name: "Owner", ...CREDENTIALS });
+
+    const sessions = await listSessions(signup.body.accessToken);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].userAgent).toBeNull();
+  });
+
+  // A refreshed session re-stamps the header from whichever request rotated
+  // it last, so the list reflects the device still using it rather than a
+  // stale value frozen at login.
+  it("updates the recorded User-Agent on refresh", async () => {
+    const first = await signUp();
+
+    await request(app)
+      .post("/api/auth/refresh")
+      .set("User-Agent", "NewBrowser/2.0")
+      .send({ refreshToken: first.refreshToken });
+
+    const sessions = await listSessions(first.accessToken);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].userAgent).toBe("NewBrowser/2.0");
   });
 
   it("lists one row per sign-in and marks only the caller's own as current", async () => {

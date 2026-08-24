@@ -48,6 +48,8 @@ export interface Session {
   expiresAt: string;
   /** True for the session this browser is making the request from. */
   current: boolean;
+  /** Null for a session that predates this field, or sent no header at all. */
+  userAgent: string | null;
 }
 
 export async function fetchSessions(): Promise<Session[]> {

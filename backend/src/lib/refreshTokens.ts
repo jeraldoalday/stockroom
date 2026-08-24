@@ -44,12 +44,16 @@ export interface IssuedRefreshToken {
 
 /**
  * Mints a refresh token and records it. `familyId` is omitted for a fresh
- * login (a new family starts) and carried through on rotation.
+ * login (a new family starts) and carried through on rotation. `userAgent`
+ * is re-stamped on every call, rotation included, so the session list
+ * reflects the device that is actually still using it rather than only the
+ * one that logged in.
  */
 export async function issueRefreshToken(
   tx: TxClient,
   userId: string,
-  familyId?: string
+  familyId?: string,
+  userAgent?: string | null
 ): Promise<IssuedRefreshToken> {
   const token = signRefreshToken({ sub: userId });
   const family = familyId ?? crypto.randomUUID();
@@ -60,6 +64,7 @@ export async function issueRefreshToken(
       tokenHash: hashRefreshToken(token),
       familyId: family,
       expiresAt: refreshTokenExpiry(),
+      userAgent: userAgent ?? null,
     },
   });
 
@@ -105,7 +110,7 @@ export interface RotationResult {
  * re-authenticate. Losing a session is recoverable, an attacker silently
  * refreshing forever is not.
  */
-export async function rotateRefreshToken(rawToken: string): Promise<RotationResult> {
+export async function rotateRefreshToken(rawToken: string, userAgent?: string | null): Promise<RotationResult> {
   let payload: { sub: string };
   try {
     payload = verifyRefreshToken(rawToken);
@@ -138,7 +143,7 @@ export async function rotateRefreshToken(rawToken: string): Promise<RotationResu
   }
 
   const issued = await prisma.$transaction(async (tx) => {
-    const next = await issueRefreshToken(tx, existing.userId, existing.familyId);
+    const next = await issueRefreshToken(tx, existing.userId, existing.familyId, userAgent);
     const replacement = await tx.refreshToken.findUnique({
       where: { tokenHash: hashRefreshToken(next.token) },
     });
@@ -173,6 +178,9 @@ export interface SessionSummary {
   createdAt: Date;
   lastActiveAt: Date;
   expiresAt: Date;
+  // Null for a family whose most recent token predates this column, or
+  // whose caller sent no User-Agent header at all.
+  userAgent: string | null;
 }
 
 /**
@@ -187,12 +195,10 @@ export interface SessionSummary {
  * A family counts as live while it still holds one unrevoked, unexpired
  * token. `lastActiveAt` is when that family last rotated, which is the
  * closest thing to "last used" available without writing on every request.
- *
- * No user agent or IP address is recorded, so the list can't say *which*
- * browser a session is. Recording those would make the list far more
- * useful and is worth doing; it is also personal data that nothing else in
- * this product currently stores, so it is a deliberate decision rather than
- * an oversight.
+ * `userAgent` follows the same "most recent row wins" rule, so it reflects
+ * the device still using the session rather than only the one that logged
+ * in — deliberately not IP address alongside it, which is a more precise
+ * and more sensitive signal than "which browser is this" needs.
  */
 export async function listSessions(userId: string): Promise<SessionSummary[]> {
   const now = new Date();
@@ -214,11 +220,13 @@ export async function listSessions(userId: string): Promise<SessionSummary[]> {
         createdAt: token.createdAt,
         lastActiveAt: token.createdAt,
         expiresAt: token.expiresAt,
+        userAgent: token.userAgent,
         live,
       });
       continue;
     }
     existing.lastActiveAt = token.createdAt;
+    existing.userAgent = token.userAgent;
     if (live) {
       existing.live = true;
       existing.expiresAt = token.expiresAt;

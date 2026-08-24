@@ -111,7 +111,7 @@ router.post(
     // The refresh token is minted first so its family id can be stamped
     // onto the access token: that is what lets an authenticated request
     // identify which session it belongs to.
-    const { token: refreshToken, familyId } = await issueRefreshToken(prisma, user.id);
+    const { token: refreshToken, familyId } = await issueRefreshToken(prisma, user.id, undefined, req.headers["user-agent"]);
     const accessToken = signAccessToken({
       sub: user.id,
       organizationId: organization.id,
@@ -152,7 +152,7 @@ router.post(
 
     // A fresh login starts a new rotation family, so signing out on one
     // device doesn't end the session on another.
-    const { token: refreshToken, familyId } = await issueRefreshToken(prisma, user.id);
+    const { token: refreshToken, familyId } = await issueRefreshToken(prisma, user.id, undefined, req.headers["user-agent"]);
     const accessToken = signAccessToken({
       sub: user.id,
       organizationId: user.organizationId,
@@ -182,7 +182,10 @@ router.post(
   "/refresh",
   asyncHandler(async (req, res) => {
     const body = refreshSchema.parse(req.body);
-    const { userId, token: refreshToken, familyId } = await rotateRefreshToken(body.refreshToken);
+    const { userId, token: refreshToken, familyId } = await rotateRefreshToken(
+      body.refreshToken,
+      req.headers["user-agent"]
+    );
 
     // Role and organization are read fresh rather than taken from the
     // token, so a promotion or demotion takes effect on the next refresh

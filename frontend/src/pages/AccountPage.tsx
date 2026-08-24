@@ -22,6 +22,41 @@ function formatMoment(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
+// A raw User-Agent string is long and not what anyone actually wants to
+// read ("Mozilla/5.0 (Macintosh; ...) AppleWebKit/537.36 ..."); this reduces
+// it to the two facts a person scanning their own session list cares about.
+// Heuristic and not exhaustive — good enough for "which one is my phone",
+// not a fingerprinting library this app has no other use for.
+function describeUserAgent(userAgent: string | null): string {
+  if (!userAgent) return "Unknown device";
+
+  const browser = /Edg\//.test(userAgent)
+    ? "Edge"
+    : /OPR\//.test(userAgent)
+      ? "Opera"
+      : /Chrome\/|CriOS\//.test(userAgent)
+        ? "Chrome"
+        : /Firefox\//.test(userAgent)
+          ? "Firefox"
+          : /Safari\//.test(userAgent)
+            ? "Safari"
+            : "Browser";
+
+  const os = /iPhone|iPad|iPod/.test(userAgent)
+    ? "iOS"
+    : /Android/.test(userAgent)
+      ? "Android"
+      : /Mac OS X/.test(userAgent)
+        ? "macOS"
+        : /Windows/.test(userAgent)
+          ? "Windows"
+          : /Linux/.test(userAgent)
+            ? "Linux"
+            : null;
+
+  return os ? `${browser} on ${os}` : browser;
+}
+
 export function AccountPage() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -180,6 +215,7 @@ export function AccountPage() {
           <table className="min-w-full divide-y divide-gray-200 text-sm">
             <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
               <tr>
+                <th className="px-4 py-2">Device</th>
                 <th className="px-4 py-2">Signed in</th>
                 <th className="px-4 py-2">Last active</th>
                 <th className="px-4 py-2">Expires</th>
@@ -190,13 +226,14 @@ export function AccountPage() {
               {sessionsQuery.data.map((session) => (
                 <tr key={session.id}>
                   <td className="px-4 py-2 text-gray-900">
-                    {formatMoment(session.createdAt)}
+                    {describeUserAgent(session.userAgent)}
                     {session.current && (
                       <span className="ml-2 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">
                         This device
                       </span>
                     )}
                   </td>
+                  <td className="px-4 py-2 text-gray-500">{formatMoment(session.createdAt)}</td>
                   <td className="px-4 py-2 text-gray-500">{formatMoment(session.lastActiveAt)}</td>
                   <td className="px-4 py-2 text-gray-500">{formatMoment(session.expiresAt)}</td>
                   <td className="px-4 py-2 text-right">

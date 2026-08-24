@@ -5,6 +5,7 @@ import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ProductsPage } from "./pages/ProductsPage";
+import { CategoriesPage } from "./pages/CategoriesPage";
 import { LocationsPage } from "./pages/LocationsPage";
 import { SuppliersPage } from "./pages/SuppliersPage";
 import { CustomersPage } from "./pages/CustomersPage";
@@ -37,6 +38,14 @@ export function App() {
         element={
           <ProtectedRoute>
             <ProductsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/categories"
+        element={
+          <ProtectedRoute>
+            <CategoriesPage />
           </ProtectedRoute>
         }
       />

@@ -271,7 +271,7 @@ const tables = {
   organization: new Table(),
   user: new Table({ role: "STAFF" }),
   location: new Table({ isDefault: false, isActive: true }),
-  category: new Table(),
+  category: new Table({ isActive: true }),
   supplier: new Table({ isActive: true }),
   customer: new Table({ isActive: true }),
   product: new Table({ isActive: true, costCents: 0, priceCents: 0, reorderPoint: 0, reorderQty: 0 }),

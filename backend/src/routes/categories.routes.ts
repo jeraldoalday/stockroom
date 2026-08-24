@@ -8,11 +8,23 @@ import { ApiError } from "../lib/errors";
 const router = Router();
 router.use(requireAuth);
 
+// Archived categories stay in the database because products can still point
+// at them; `status` is how the list decides whether to show them. Defaults
+// to "active", so every existing caller (the inline picker on the product
+// form) behaves exactly as it did.
+const listQuerySchema = z.object({
+  status: z.enum(["active", "archived", "all"]).default("active"),
+});
+
 router.get(
   "/",
   asyncHandler(async (req, res) => {
+    const query = listQuerySchema.parse(req.query);
     const categories = await prisma.category.findMany({
-      where: { organizationId: req.auth!.organizationId },
+      where: {
+        organizationId: req.auth!.organizationId,
+        ...(query.status === "all" ? {} : { isActive: query.status === "active" }),
+      },
       orderBy: { name: "asc" },
     });
     res.json(categories);
@@ -62,6 +74,10 @@ router.patch(
   })
 );
 
+// Archive, not delete — same reason as Supplier/Customer/Location. Hard
+// deleting used to succeed silently and clear `categoryId` on every product
+// filed under it (the FK is ON DELETE SET NULL), which is worse than the
+// 409 the other archivable entities used to give: nothing said it happened.
 router.delete(
   "/:id",
   asyncHandler(async (req, res) => {
@@ -72,9 +88,34 @@ router.delete(
     if (!category) {
       throw ApiError.notFound("Category not found");
     }
+    if (!category.isActive) {
+      throw ApiError.conflict("This category is already archived");
+    }
 
-    await prisma.category.delete({ where: { id: category.id } });
+    await prisma.category.update({ where: { id: category.id }, data: { isActive: false } });
     res.status(204).send();
+  })
+);
+
+router.post(
+  "/:id/restore",
+  asyncHandler(async (req, res) => {
+    const organizationId = req.auth!.organizationId;
+    const category = await prisma.category.findFirst({
+      where: { id: req.params.id, organizationId },
+    });
+    if (!category) {
+      throw ApiError.notFound("Category not found");
+    }
+    if (category.isActive) {
+      throw ApiError.conflict("This category is not archived");
+    }
+
+    const restored = await prisma.category.update({
+      where: { id: category.id },
+      data: { isActive: true },
+    });
+    res.json(restored);
   })
 );
 

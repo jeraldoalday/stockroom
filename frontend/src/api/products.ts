@@ -1,5 +1,5 @@
 import { apiClient } from "./client";
-import type { Category, Product, ProductListResponse } from "./types";
+import type { Product, ProductListResponse } from "./types";
 
 export type ProductStatusFilter = "active" | "archived" | "all";
 
@@ -34,16 +34,6 @@ export type UpdateProductPayload = Partial<CreateProductPayload>;
 
 export async function updateProduct(id: string, payload: UpdateProductPayload): Promise<Product> {
   const res = await apiClient.patch<Product>(`/products/${id}`, payload);
-  return res.data;
-}
-
-export async function fetchCategories(): Promise<Category[]> {
-  const res = await apiClient.get<Category[]>("/categories");
-  return res.data;
-}
-
-export async function createCategory(name: string): Promise<Category> {
-  const res = await apiClient.post<Category>("/categories", { name });
   return res.data;
 }
 

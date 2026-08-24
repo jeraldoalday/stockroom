@@ -22,6 +22,7 @@ export interface AuthResponse {
 export interface Category {
   id: string;
   name: string;
+  isActive: boolean;
 }
 
 export interface Product {

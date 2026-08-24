@@ -5,15 +5,14 @@ import { AppShell } from "../components/AppShell";
 import { useAuth } from "../context/AuthContext";
 import {
   archiveProduct,
-  createCategory,
   createProduct,
-  fetchCategories,
   fetchProducts,
   importProductsCsv,
   restoreProduct,
   updateProduct,
 } from "../api/products";
 import type { ImportProductsResult, ProductStatusFilter } from "../api/products";
+import { createCategory, fetchCategories } from "../api/categories";
 import type { Product } from "../api/types";
 import { isApiError } from "../api/errors";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -77,7 +76,7 @@ export function ProductsPage() {
 
   const categoriesQuery = useQuery({
     queryKey: ["categories"],
-    queryFn: fetchCategories,
+    queryFn: () => fetchCategories(),
   });
 
   const createCategoryMutation = useMutation({

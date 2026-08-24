@@ -1274,8 +1274,147 @@ recomputed from the seed simulation rather than from a seeded database.
    still reading every active product.
 4. **Recording a user agent against a session**, so the Account page can say
    which browser a session is rather than only when it started. It is
-   personal data nothing else here stores, so it is a decision to make
+   personal data nothing here stores, so it is a decision to make
    deliberately rather than a gap to close.
 5. Smaller: archive/restore for categories, the last list still
    hard-deleting; a "dead stock" CSV export, since the report is exactly the
    thing an owner would want to take to a supplier.
+
+## Day 19 (post-MVP) — 2026-08-24
+
+**Planned:** the Day 18 "Next" list, smallest and lowest-risk items first —
+category archive/restore, the dead-stock CSV export, raw SQL for the
+low-stock predicate, and recording a session's User-Agent. Transactional
+email (item 1) and shared-state rate limiting (item 2) were left again; see
+Blockers/decisions.
+
+This session had `pg_ctlcluster`, `psql`, and Chromium all available (Day
+16-18 didn't), so every change below is verified against a real Postgres
+instance and a real browser, not just the mocked test suite — noted per
+item below since several recent entries had to record the opposite.
+
+**Shipped — category archive/restore:**
+
+- Category was the last list that hard-deleted. Removing one used to
+  succeed silently and clear `categoryId` on every product filed under it
+  (the FK is `ON DELETE SET NULL`) with no confirmation and no way back —
+  worse than the 409 Supplier/Customer/Location used to give before they
+  got the same treatment on Day 17-18. `DELETE` now archives, `/restore`
+  brings it back, `GET` takes `?status=`.
+- New `CategoriesPage` (list, inline rename, archive/restore) — until now
+  the only frontend surface was the inline create-and-select widget on the
+  product form, with no way to fix a typo'd name or retire an unused one.
+  Flagged as a reasonable pickup back in Day 16's entry.
+- Found the same bug Day 18 fixed for `fetchLocations` while wiring the new
+  page's category picker: `queryFn: fetchCategories` handed TanStack's query
+  context to `fetchCategories` as its `status` argument. Harmless while the
+  function took no parameters; became a live bug the moment `fetchCategories`
+  grew one. Fixed the same way — wrap in an arrow function — and this is the
+  second time this exact shape has bitten a page in this codebase, worth
+  watching for a third.
+- Verified against real Postgres + a real browser: create → rename →
+  assign to a product → archive (product keeps its category, archived
+  category no longer offered on the product form) → restore, plus the
+  9 new Jest tests (mock defaults needed a fix too — `category` had no
+  `isActive: true` default in the in-memory table, so a freshly created
+  category read back as already-archived).
+
+**Shipped — dead-stock CSV export:**
+
+- `GET /api/reports/export/dead-stock` (Owner-only, same guard as the JSON
+  report). Unlike the JSON route it has no row limit — a CSV an owner is
+  about to hand to a supplier or file away should be the whole list, not
+  what a dashboard panel can fit on screen.
+- Refactored the JSON report's row-shaping (quantity × cost, days-since-
+  last-sale) into a helper shared with the new CSV route, so the two can't
+  quietly disagree on the numbers the way independently-written duplicates
+  eventually do.
+- Verified against real Postgres + a real browser: received stock into a
+  product with no sales, confirmed it appears on the Reports page's
+  dead-stock panel, clicked "Export Dead stock", and read the actual
+  downloaded file back off disk to confirm it carried the SKU and a
+  `tied_up_value_cents` column.
+
+**Shipped — raw SQL for the low-stock predicate:**
+
+- The dashboard's `/summary` and `/low-stock` had one piece of arithmetic no
+  Prisma query builder can express — comparing a product's *summed*
+  inventory across locations against its `reorderPoint` — so both endpoints
+  still read every active product into JS to do that one comparison, even
+  after the Day 18 pass moved everything else to `GROUP BY`. Both now run a
+  single raw SQL query each: one aggregate row for the summary's three
+  figures, and a paginated, ordered `/low-stock` list that gets its total
+  from `COUNT(*) OVER()` in the same round trip instead of a second query.
+- The in-memory Prisma test double has no SQL engine, so `$queryRaw`
+  dispatches by a marker comment (`-- dashboardStats.xxx`) to a hand-written
+  equivalent over the same in-memory tables — the same trade the mock
+  already makes for `groupBy`/`aggregate`, extended to raw SQL. Documented
+  in both files as a manual sync point, since there's no way around that
+  short of embedding a real SQL engine in a test double.
+- Verified against real Postgres with a case the mocked test suite can't
+  exercise as convincingly: a product stocked at two locations (summed
+  correctly), a product with *no* inventory row at all (correctly counted
+  as low stock — a fresh product with a reorder point and zero stock has no
+  `inventory_items` row until something touches it), and pagination/
+  ordering checked across a real two-page result. All matched by hand
+  before trusting the Jest suite's green result.
+
+**Shipped — session User-Agent (Day 18 Next item 4):**
+
+- `RefreshToken.userAgent`, captured from the request header at signup,
+  login, and every refresh (re-stamped each rotation, so the session list
+  reflects the device still using it rather than only the one that logged
+  in). Deliberately not IP address alongside it, which Day 18's entry
+  lumped in together — IP is a more precise, more sensitive signal than
+  "which browser is this" actually needs, so this session narrowed the
+  scope rather than shipping both by default.
+- Account page renders it as "Chrome on macOS" via a small heuristic
+  regex parser rather than the raw header string or a UA-parsing
+  dependency — consistent with the existing "no charting library for one
+  view" call on the Reports page.
+- Verified against real Postgres + a real browser: the row for the
+  session actually driving the browser read "Chrome on Linux" correctly
+  under the "This device" badge.
+
+**Verified (all three services, every item above):** backend `npx tsc
+--noEmit` (both tsconfigs), `npm run lint`, and the full Jest suite
+(310/310, up from 295); python-service `python3 -m pytest -q` (44/44, up
+from 40 — the `pytest` binary still can't see the installed packages in
+this sandbox, same note as Day 15-16, use `python3 -m pytest`); frontend
+`npm run lint` and `npm run build`. All clean. Beyond that: `pg_ctlcluster
+16 main start`, created the `stockroom` role/db and the
+`stockroom_readonly` role from scratch (neither existed yet this session),
+ran all migrations, and — unlike the last several entries — had a working
+Chromium to drive real Playwright scripts against all three running
+services for every feature above, not just the backend API by hand.
+
+**Next:**
+
+1. **Transactional email.** Unchanged as the top item across four straight
+   entries now: forgot-password works end to end but the shipped sender
+   logs to the console, and invites are still an Owner-set temporary
+   password. No provider is configured anywhere in this stack; picking one
+   is a decision worth raising with a human rather than guessing.
+2. **Shared-state rate limiting**, required before a second API instance —
+   unchanged, still in-process only.
+3. Smaller, unchanged from Day 18: archive/restore for locations exists but
+   not yet the read-only-role-style deploy verification against a fresh
+   environment; the refresh-token pruning and dashboard SQL work landed on
+   Day 18 could use the same real-Postgres verification treatment this
+   session gave category archiving and the low-stock query, now that a
+   sandbox with Postgres is available again — worth doing opportunistically
+   whenever a future session has one, even without a code change attached.
+
+**Blockers/decisions carried forward:**
+
+- Did not attempt transactional email or shared-state rate limiting this
+  session, for the same reasons recorded in every prior entry: email needs
+  a provider decision nothing in the PRD resolves, and rate limiting's
+  correct shared store (Redis vs. the existing Postgres database) is a real
+  infrastructure choice rather than a small slice — both are next in line
+  once picked up.
+- `describeUserAgent` on the Account page is a best-effort heuristic, not a
+  real UA parser — it will mislabel or fall back to a bare browser name for
+  less common browsers/OSes. Acceptable for "which one is my phone"; would
+  need a real dependency if this ever needs to be authoritative (e.g. for a
+  security alert about a new device).

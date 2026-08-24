@@ -388,3 +388,52 @@ def test_dead_stock_rejects_an_out_of_range_window():
         headers=HEADERS,
     )
     assert res.status_code == 422
+
+
+# --- Dead stock CSV export -------------------------------------------------
+#
+# The report an owner would actually hand to someone — a supplier, an
+# accountant — rather than the JSON a dashboard panel renders. Shares the
+# same row-shaping helper as the JSON report above, so these two assert the
+# same numbers rather than re-deriving them.
+
+
+def test_export_dead_stock_requires_internal_key():
+    res = client.get("/export/dead-stock", params={"organization_id": "org_1"})
+    assert res.status_code == 401
+
+
+def test_export_dead_stock_returns_csv_with_shaped_columns(monkeypatch):
+    monkeypatch.setattr(
+        "app.routers.reports.fetch_dead_stock",
+        lambda conn, organization_id, since: [_dead_stock_row()],
+    )
+    res = client.get("/export/dead-stock", params={"organization_id": "org_1"}, headers=HEADERS)
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("text/csv")
+    assert "DUST-1" in res.text
+    assert "tied_up_value_cents" in res.text
+    assert str(12 * 250) in res.text
+
+
+# The JSON report caps at `limit` so a dashboard panel doesn't drown; the
+# export is a handoff document and has no such cap.
+def test_export_dead_stock_has_no_row_limit(monkeypatch):
+    rows = [
+        _dead_stock_row(product_id=f"prod_{i}", sku=f"DUST-{i}", quantity_on_hand=2, cost_cents=100)
+        for i in range(60)
+    ]
+    monkeypatch.setattr("app.routers.reports.fetch_dead_stock", lambda conn, organization_id, since: rows)
+
+    res = client.get("/export/dead-stock", params={"organization_id": "org_1"}, headers=HEADERS)
+    assert res.status_code == 200
+    assert res.text.count("DUST-") == 60
+
+
+def test_export_dead_stock_rejects_an_out_of_range_window():
+    res = client.get(
+        "/export/dead-stock",
+        params={"organization_id": "org_1", "days": 3},
+        headers=HEADERS,
+    )
+    assert res.status_code == 422

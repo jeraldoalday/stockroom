@@ -225,3 +225,66 @@ describe("GET /api/reports/dead-stock", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
+
+describe("GET /api/reports/export/dead-stock", () => {
+  async function signUpOwnerAndInviteStaff() {
+    const owner = await request(app).post("/api/auth/signup").send({
+      organizationName: "The Shop",
+      name: "Owner",
+      email: "owner-dead-export@shop.test",
+      password: "hunter22222",
+    });
+    const ownerToken = owner.body.accessToken as string;
+
+    await request(app)
+      .post("/api/users")
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ name: "Clerk", email: "clerk-dead-export@shop.test", password: "hunter22222", role: "STAFF" });
+
+    const staff = await request(app)
+      .post("/api/auth/login")
+      .send({ email: "clerk-dead-export@shop.test", password: "hunter22222" });
+
+    return { ownerToken, staffToken: staff.body.accessToken as string };
+  }
+
+  it("proxies the dead-stock CSV for an Owner", async () => {
+    const { ownerToken } = await signUpOwnerAndInviteStaff();
+    const fetchSpy = mockPythonServiceResponse("sku,name,tied_up_value_cents\nDUST-1,Old Stock,3000\n");
+
+    const res = await request(app)
+      .get("/api/reports/export/dead-stock?days=180")
+      .set("Authorization", `Bearer ${ownerToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.text).toContain("DUST-1");
+    const calledUrl = new URL(String(fetchSpy.mock.calls[0][0]));
+    expect(calledUrl.pathname).toBe("/export/dead-stock");
+    expect(calledUrl.searchParams.get("days")).toBe("180");
+  });
+
+  // Same cost-figure reasoning as the JSON report: Owner-only outright.
+  it("refuses a Staff caller without calling the Python service", async () => {
+    const { staffToken } = await signUpOwnerAndInviteStaff();
+    const fetchSpy = mockPythonServiceResponse("sku,name\n");
+
+    const res = await request(app)
+      .get("/api/reports/export/dead-stock")
+      .set("Authorization", `Bearer ${staffToken}`);
+
+    expect(res.status).toBe(403);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects a window outside the supported range before proxying", async () => {
+    const { ownerToken } = await signUpOwnerAndInviteStaff();
+    const fetchSpy = mockPythonServiceResponse("sku,name\n");
+
+    const res = await request(app)
+      .get("/api/reports/export/dead-stock?days=2")
+      .set("Authorization", `Bearer ${ownerToken}`);
+
+    expect(res.status).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});

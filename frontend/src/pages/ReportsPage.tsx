@@ -19,6 +19,7 @@ const EXPORT_LABELS: Record<ExportKind, string> = {
   products: "Products",
   stock: "Stock on hand",
   movements: "Stock movements",
+  "dead-stock": "Dead stock",
 };
 
 export function ReportsPage() {
@@ -45,7 +46,13 @@ export function ReportsPage() {
     setExportError(null);
     setExportingKind(kind);
     try {
-      await downloadExport(kind, kind === "movements" ? { days } : undefined);
+      if (kind === "movements") {
+        await downloadExport(kind, { days });
+      } else if (kind === "dead-stock") {
+        await downloadExport(kind, { days: deadStockDays });
+      } else {
+        await downloadExport(kind);
+      }
     } catch (err) {
       setExportError(isApiError(err) ? err.response?.data?.error ?? "Could not export CSV" : "Could not export CSV");
     } finally {
@@ -251,7 +258,12 @@ export function ReportsPage() {
         <h2 className="text-lg font-semibold text-gray-900">Export CSV</h2>
         {exportError && <p className="mt-2 text-sm text-red-600">{exportError}</p>}
         <div className="mt-3 flex flex-wrap gap-2">
-          {(Object.keys(EXPORT_LABELS) as ExportKind[]).map((kind) => (
+          {(Object.keys(EXPORT_LABELS) as ExportKind[])
+            // Owner-only server-side, same as the dead-stock report itself —
+            // offering the button to Staff would just spend a request to be
+            // told 403.
+            .filter((kind) => kind !== "dead-stock" || isOwner)
+            .map((kind) => (
             <button
               key={kind}
               type="button"

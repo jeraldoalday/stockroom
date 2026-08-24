@@ -42,6 +42,34 @@ def _csv_response(rows: list[dict[str, Any]], filename: str) -> Response:
     )
 
 
+# Shared by the dead-stock JSON report and its CSV export below, so the two
+# can't quietly disagree on what "days since last sale" or "value tied up"
+# means.
+def _shape_dead_stock_row(row: dict[str, Any], now: datetime) -> dict[str, Any]:
+    quantity = int(row["quantity_on_hand"])
+    cost_cents = int(row["cost_cents"])
+    last_sold_at = row["last_sold_at"]
+    days_since_last_sale = None
+    if last_sold_at is not None:
+        # Rows come back timezone-aware from Postgres, but SQLite and a
+        # hand-built test row may not; treating a naive timestamp as UTC
+        # beats raising on the subtraction.
+        reference = last_sold_at if last_sold_at.tzinfo else last_sold_at.replace(tzinfo=timezone.utc)
+        days_since_last_sale = (now - reference).days
+    return {
+        "productId": row["product_id"],
+        "sku": row["sku"],
+        "name": row["name"],
+        "quantityOnHand": quantity,
+        "costCents": cost_cents,
+        # What this row is actually costing: stock on hand valued at cost,
+        # not at the price it is failing to sell for.
+        "tiedUpValueCents": quantity * cost_cents,
+        "lastSoldAt": last_sold_at.isoformat() if last_sold_at is not None else None,
+        "daysSinceLastSale": days_since_last_sale,
+    }
+
+
 @router.get("/export/products", dependencies=[Depends(require_internal_caller)])
 def export_products(
     organization_id: str = Query(...),
@@ -72,6 +100,34 @@ def export_movements(
     since = datetime.now(timezone.utc) - timedelta(days=days)
     rows = fetch_movement_rows(conn, organization_id, since)
     return _csv_response(rows, "movements.csv")
+
+
+@router.get("/export/dead-stock", dependencies=[Depends(require_internal_caller)])
+def export_dead_stock(
+    organization_id: str = Query(...),
+    days: int = Query(default=90, ge=7, le=730),
+    conn: Connection = Depends(get_db),
+) -> Response:
+    # No `limit` here, unlike the JSON report: a CSV an owner is about to
+    # hand to a supplier or file away should be the whole list, not the page
+    # a dashboard panel can fit on screen. Same shaping as the JSON route via
+    # `_shape_dead_stock_row`, so the two can't disagree on the numbers.
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=days)
+    rows = [_shape_dead_stock_row(row, now) for row in fetch_dead_stock(conn, organization_id, since)]
+    csv_rows = [
+        {
+            "sku": row["sku"],
+            "name": row["name"],
+            "quantity_on_hand": row["quantityOnHand"],
+            "cost_cents": row["costCents"],
+            "tied_up_value_cents": row["tiedUpValueCents"],
+            "last_sold_at": row["lastSoldAt"],
+            "days_since_last_sale": row["daysSinceLastSale"],
+        }
+        for row in rows
+    ]
+    return _csv_response(csv_rows, "dead-stock.csv")
 
 
 @router.get("/reports/trend", dependencies=[Depends(require_internal_caller)])
@@ -161,32 +217,7 @@ def dead_stock(
     since = now - timedelta(days=days)
     rows = fetch_dead_stock(conn, organization_id, since)
 
-    items = []
-    for row in rows[:limit]:
-        quantity = int(row["quantity_on_hand"])
-        cost_cents = int(row["cost_cents"])
-        last_sold_at = row["last_sold_at"]
-        days_since_last_sale = None
-        if last_sold_at is not None:
-            # Rows come back timezone-aware from Postgres, but SQLite and a
-            # hand-built test row may not; treating a naive timestamp as UTC
-            # beats raising on the subtraction.
-            reference = last_sold_at if last_sold_at.tzinfo else last_sold_at.replace(tzinfo=timezone.utc)
-            days_since_last_sale = (now - reference).days
-        items.append(
-            {
-                "productId": row["product_id"],
-                "sku": row["sku"],
-                "name": row["name"],
-                "quantityOnHand": quantity,
-                "costCents": cost_cents,
-                # What this row is actually costing: stock on hand valued at
-                # cost, not at the price it is failing to sell for.
-                "tiedUpValueCents": quantity * cost_cents,
-                "lastSoldAt": last_sold_at.isoformat() if last_sold_at is not None else None,
-                "daysSinceLastSale": days_since_last_sale,
-            }
-        )
+    items = [_shape_dead_stock_row(row, now) for row in rows[:limit]]
 
     return {
         "days": days,

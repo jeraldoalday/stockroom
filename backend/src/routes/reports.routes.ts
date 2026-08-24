@@ -51,6 +51,27 @@ router.get(
   })
 );
 
+const deadStockExportQuerySchema = z.object({
+  days: z.coerce.number().int().min(7).max(730).optional(),
+});
+
+// Same report as GET /dead-stock below, as a CSV — the thing an owner would
+// actually take to a supplier or file away, unbounded by the JSON route's
+// `limit` (a dashboard panel needs a page; a handoff document needs the
+// whole list). Owner-only for the same reason: every column is a cost figure.
+router.get(
+  "/export/dead-stock",
+  requireRole("OWNER"),
+  asyncHandler(async (req, res) => {
+    const query = deadStockExportQuerySchema.parse(req.query);
+    const result = await callPythonService("/export/dead-stock", {
+      organization_id: req.auth!.organizationId,
+      ...(query.days ? { days: String(query.days) } : {}),
+    });
+    sendProxied(res, result);
+  })
+);
+
 // F11: sales/stock trend, 7/30-day windows. JSON, not a file download, so
 // the frontend can render it directly instead of triggering a save.
 router.get(

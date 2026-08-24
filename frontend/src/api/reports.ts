@@ -72,7 +72,7 @@ export async function fetchDeadStock(days: number): Promise<DeadStockResponse> {
   return res.data;
 }
 
-export type ExportKind = "products" | "stock" | "movements";
+export type ExportKind = "products" | "stock" | "movements" | "dead-stock";
 
 // Downloads share the same axios instance (and its auth interceptor) as
 // every other API call, then hand the browser the file as a blob URL —

@@ -285,6 +285,74 @@ const tables = {
   refreshToken: new Table({ revokedAt: null, replacedById: null }),
 };
 
+// `lib/dashboardStats.ts` pushes the low-stock predicate (a comparison
+// between an aggregate of one table and a column on another, which Prisma's
+// query builder can't express) into two raw SQL queries. There is no SQL
+// engine here to run them against, so each is re-derived directly from the
+// in-memory tables instead — matched by the marker comment
+// (`-- dashboardStats.xxx`) each query carries for exactly this purpose,
+// the same way a real query planner would use the SQL's own shape. This has
+// to be kept in step by hand with dashboardStats.ts; there is no way around
+// that short of embedding a real SQL engine in a test double.
+function sumQuantityByProductId(): Map<string, number> {
+  const totals = new Map<string, number>();
+  for (const item of tables.inventoryItem.rows) {
+    totals.set(item.productId, (totals.get(item.productId) ?? 0) + Number(item.quantity ?? 0));
+  }
+  return totals;
+}
+
+function mockStockSummary(organizationId: string): Rec[] {
+  const quantityByProduct = sumQuantityByProductId();
+  const products = tables.product.rows.filter((p) => p.organizationId === organizationId && p.isActive);
+
+  let totalStockValueCents = 0;
+  let lowStockCount = 0;
+  for (const product of products) {
+    const quantity = quantityByProduct.get(product.id) ?? 0;
+    totalStockValueCents += quantity * (product.costCents ?? 0);
+    if (quantity <= product.reorderPoint) lowStockCount += 1;
+  }
+
+  return [{ activeProductCount: products.length, totalStockValueCents, lowStockCount }];
+}
+
+function mockLowStockPage(organizationId: string, pageSize: number, offset: number): Rec[] {
+  const quantityByProduct = sumQuantityByProductId();
+  const products = tables.product.rows.filter((p) => p.organizationId === organizationId && p.isActive);
+
+  const lowStock = products
+    .map((product): Rec => ({ ...product, quantity: quantityByProduct.get(product.id) ?? 0 }))
+    .filter((product) => product.quantity <= product.reorderPoint)
+    .sort((a, b) => a.quantity - b.quantity || String(a.name).localeCompare(String(b.name)));
+
+  const total = lowStock.length;
+  return lowStock.slice(offset, offset + pageSize).map((row) => ({ ...row, totalCount: total }));
+}
+
+// Dispatches a tagged-template $queryRaw call to its hand-written
+// equivalent above by marker comment. Both mocked queries interpolate
+// organizationId as their first value (possibly more than once, always the
+// same value), so `values[0]` is always safe to read as it regardless of
+// how many times it repeats later in the array.
+function $queryRaw(strings: TemplateStringsArray, ...values: unknown[]): Promise<Rec[]> {
+  const sql = strings.join("");
+  const organizationId = values[0] as string;
+
+  if (sql.includes("dashboardStats.stockSummary")) {
+    return Promise.resolve(mockStockSummary(organizationId));
+  }
+  if (sql.includes("dashboardStats.lowStockPage")) {
+    const pageSize = Number(values[values.length - 2]);
+    const offset = Number(values[values.length - 1]);
+    return Promise.resolve(mockLowStockPage(organizationId, pageSize, offset));
+  }
+
+  throw new Error(
+    `Prisma mock: unrecognised $queryRaw call — add a marker comment and a matching mock branch rather than leaving the query untested.\nSQL: ${sql}`
+  );
+}
+
 // `__reset` hangs off the mocked client itself rather than being a separate
 // named export, because a test file only ever holds a reference to *this*
 // module instance through `jest.mock("../lib/prisma")`. Importing
@@ -295,6 +363,7 @@ const tables = {
 // see __tests__/testUtils/prismaMock.ts.
 export const prisma = {
   ...tables,
+  $queryRaw,
   $transaction: async (fn: (tx: typeof tables) => Promise<unknown>) => fn(tables),
   __reset() {
     Object.values(tables).forEach((table) => table.reset());

@@ -41,6 +41,11 @@ as the database.
 | `PYTHON_SERVICE_URL` | yes | Private address of the reports service. |
 | `PYTHON_SERVICE_INTERNAL_KEY` | yes | Must match the Python service's `INTERNAL_API_KEY`. |
 | `NODE_ENV` | yes | Set to `production`. |
+| `SMTP_HOST` | no | Unset, forgot-password and invite emails log to the console instead of sending — fine for a demo, not for a real customer. Set this (any SMTP-speaking provider: SendGrid, Postmark, SES, Mailgun, ...) to send for real. |
+| `SMTP_PORT` | no (`587`) | |
+| `SMTP_SECURE` | no (`false`) | Set `true` for a provider that expects implicit TLS (typically port 465) rather than STARTTLS. |
+| `SMTP_USER` / `SMTP_PASS` | no | Required by most providers; some (an internal relay) don't need auth. |
+| `SMTP_FROM` | no | Defaults to a placeholder `stockroom.app` address — replace with a domain you actually control, or most providers will reject or spam-flag the send. |
 
 The backend refuses to start if `DATABASE_URL`, `JWT_ACCESS_SECRET` or
 `JWT_REFRESH_SECRET` is missing (`src/lib/env.ts`), which is deliberate:
@@ -164,19 +169,20 @@ add a second instance.
   keeps: a revoked refresh token that has not yet expired is the
   reuse detector, and deleting those early would turn a replayed token into
   an ordinary 401 with the rest of the attacker's family still working.
-- **No email provider.** Forgot-password works end to end against a
-  pluggable `EmailSender`, but the shipped implementation logs the reset
-  link to the server console instead of sending it — so in production a user
-  who forgets their password still needs an Owner or a database change, and
-  adding a staff member still means an Owner choosing a temporary password
-  and telling them directly.
-- **The low-stock comparison still runs in application code.** The sums
-  behind `/api/dashboard/summary` and `/top-movers` are now GROUP BY queries,
-  but deciding which products are below their reorder point is a predicate
-  across two tables that Prisma's query builder can't express, so every
-  active product is still listed to make the comparison. Fine at the 10k-SKU
-  NFR target; past that it wants a raw SQL query, whose shape is written
-  down in a comment in `dashboard.routes.ts`.
+- **No email provider configured by default.** `EmailSender` (`lib/email.ts`)
+  has a real SMTP implementation now, used automatically once `SMTP_HOST` is
+  set (see the env var table above) — works with any provider that speaks
+  SMTP. Left unset, both forgot-password and Team invites still fall back to
+  logging the link to the server console, which is fine for a demo but means
+  a production deploy that skips this still leaves a forgotten password or a
+  new hire needing a database change instead of an email.
+- **Dashboard low-stock comparison is now raw SQL, not application code.**
+  `/api/dashboard/summary` and `/low-stock` each run one query
+  (`lib/dashboardStats.ts`) that does the sum-and-compare in Postgres instead
+  of reading every active product into JS. Verified against a real Postgres
+  instance, including the zero-inventory-row case. No known limitation left
+  here; keeping this line only long enough to note it moved off the
+  application-code list a session after the one above described it.
 - **No structured logging, metrics or error reporting.** Errors go to
   `console.error` and unhandled 500s carry no request id, so a production
   failure is only diagnosable if you happen to be tailing the logs.

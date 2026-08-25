@@ -201,18 +201,21 @@ and it's the one worth demonstrating rather than asserting.
 ## Intentionally out of scope for this demo
 
 - Payment and billing (PRD §12, deferred to v2).
-- Email-based invites — the Team page issues a temporary password the Owner
-  shares directly (decision recorded in `docs/PROGRESS.md`, Day 13).
 - Per-location reorder points — `reorderPoint` is product-level today
   (decision recorded in `docs/PROGRESS.md`, Day 2-6).
 
 ## Known gaps, if asked
 
 Be straight about these; they're all in `docs/DEPLOYMENT.md` in more
-detail. Forgot-password works end to end, but no email provider is
-configured — the shipped `EmailSender` logs the reset link to the server
-console instead of sending it, and invites are still an Owner-set temporary
-password. Signing out and any password change now revoke the session
+detail. Forgot-password and Team invites both work end to end through the
+same emailed one-time link (`lib/email.ts`), and the sender is now a real
+SMTP client — set `SMTP_HOST`/`SMTP_USER`/`SMTP_PASS`/`SMTP_FROM` (any
+provider that speaks SMTP: SendGrid, Postmark, SES, Mailgun, ...) to send
+for real. Left unset — as in this demo sandbox, with no provider
+configured — it falls back to logging the link to the server console, so
+both flows still work end to end for a demo, just by reading the link out
+of the log instead of an inbox. Signing out and any password change now
+revoke the session
 server-side, though an already-issued access token stays valid for up to
 15 minutes. Rate limiting is per-process and weakens behind a load
 balancer. Expired token rows are now swept on a timer inside the API

@@ -184,13 +184,16 @@ Signing off means being explicit about what "complete" does *not* cover,
 since these are the things a first paying customer meets. None of them is
 blocking for a design-partner pilot:
 
-- **No real transactional email provider.** Forgot-password works
-  end-to-end against a pluggable `EmailSender`, but the shipped
-  implementation logs the reset link to the server console instead of
-  sending it, and the Team page's invite flow still uses an Owner-set
-  temporary password rather than an emailed link. Both are one
-  `EmailSender` implementation away from real once a provider is picked.
-  This remains the largest gap for a real customer.
+- ~~**No real transactional email provider.**~~ **Resolved (Day 20):**
+  `EmailSender` has an SMTP implementation (`nodemailer`), selected by
+  setting `SMTP_HOST` — provider-agnostic rather than tied to one vendor's
+  SDK, since SendGrid/Postmark/SES/Mailgun all accept SMTP. Unset, it still
+  falls back to logging to the console, so nothing breaks where no provider
+  is configured (every sandbox so far, including this one). The Team page's
+  invite flow was also rebuilt onto the same one-time-link machinery as
+  forgot-password: the Owner no longer sets or sees the new member's
+  password at all — the account is created locked, and the invite email
+  carries a `/reset-password` link the member uses to set their own.
 - ~~**Refresh tokens cannot be revoked.**~~ **Resolved (Day 17):** refresh
   tokens rotate on use, are recorded server-side, and are revoked by
   signing out or by any password change. Access tokens are still bearer

@@ -1418,3 +1418,131 @@ services for every feature above, not just the backend API by hand.
   less common browsers/OSes. Acceptable for "which one is my phone"; would
   need a real dependency if this ever needs to be authoritative (e.g. for a
   security alert about a new device).
+
+## Day 20 (post-MVP) — 2026-08-25
+
+**Planned:** the top of the Day 19 "Next" list — transactional email, the
+largest gap flagged across five straight entries.
+
+**Found the local dev/CI state was ahead of `origin/main`:** before starting,
+`origin/main` (as seen from a fresh fetch) was still at the Day 17 commit,
+while the working tree already held Day 18 and Day 19's 18 commits,
+unpushed. Re-verified the tree against real Postgres and all three
+build/test commands (backend 310/310, python-service 44/44, frontend build)
+before pushing, since a session that never got to push also never had its
+final state confirmed clean by anyone downstream — then pushed before
+starting new work, so this and every future session starts from what's
+actually on `origin/main`.
+
+**Shipped — a real (pluggable) email sender:**
+
+- `EmailSender` (`lib/email.ts`) gained an SMTP implementation
+  (`nodemailer`), switched on by setting `SMTP_HOST`. Deliberately generic
+  SMTP rather than one provider's SDK — SendGrid, Postmark, SES, and
+  Mailgun all accept an SMTP relay, so this doesn't bet the codebase on a
+  vendor choice nothing in the PRD makes, while still being one config
+  change away from real delivery through any of them. Unset (every sandbox
+  so far, including this one — no provider or credentials exist anywhere in
+  this environment), it still falls back to `ConsoleEmailSender`, so nothing
+  that depends on it broke.
+- New env vars `SMTP_HOST`/`SMTP_PORT`/`SMTP_SECURE`/`SMTP_USER`/
+  `SMTP_PASS`/`SMTP_FROM`, documented in `backend/.env.example` and
+  `docs/DEPLOYMENT.md`.
+- 3 new backend tests (`email.test.ts`) exercising both branches by
+  re-requiring the module with `jest.resetModules()` under different env,
+  with `nodemailer` mocked so no real network call happens in CI.
+
+**Shipped — invites now go out as an emailed link, not an Owner-set
+password:**
+
+- This was the second half of the gap PRD §13 named ("invites are still an
+  Owner-set temporary password") and, on reflection, the more important
+  half to close now that a sender exists — an Owner choosing and relaying a
+  real credential for someone else's account was the actual smell, not just
+  the lack of an inbox to put it in.
+- `POST /api/users` no longer accepts a `password` field. The account is
+  created locked (its hash is a random value nobody, including the Owner,
+  ever sees), and the invite reuses the exact machinery forgot-password
+  already had: `lib/auth.ts` gained shared `generateOpaqueToken`/
+  `hashOpaqueToken` helpers (previously duplicated as a private
+  `hashResetToken` inside `auth.routes.ts` — extracted so the two call sites
+  can't drift onto different token schemes), a `PasswordResetToken` row is
+  created with a 7-day expiry (versus the 1-hour forgot-password window — an
+  invite is the only way into a brand-new account, so it needs to survive a
+  weekend; a reset is a fallback for an account with another way in
+  already), and the email links to the same `/reset-password` endpoint and
+  page.
+- `/reset-password?token=...&type=invite` — the `type=invite` param is
+  purely a frontend copy switch (`ResetPasswordPage` shows "Welcome to
+  StockRoom — set your password" / "Set password" instead of the
+  reset-flavored copy, and routes to a different success banner on
+  `LoginPage`); the backend endpoint and the token itself don't distinguish
+  an invite from a reset at all, on purpose — they're the same action
+  ("prove you hold this link, choose a password") wearing different words.
+- `TeamPage`'s invite form lost its temporary-password field; it now just
+  asks for name, email, role, with a line explaining the invited member sets
+  their own password from an email.
+- Test fallout: five backend test files (`users.test.ts`, `rbac.test.ts`,
+  `movementPricing.test.ts`, `reports.test.ts`, `secrets.test.ts`) invited a
+  Staff user by posting a chosen password directly, then logged in with it —
+  that shape no longer exists. Added a shared test helper
+  (`testUtils/invite.ts`) that spies on `emailSender.send`, pulls the token
+  back out of the message text, and spends it through the real
+  `/reset-password` endpoint, and pointed every call site at it. The
+  `users.test.ts` invite test itself was rewritten to assert the locked-account
+  behavior directly (login with a guessed password 401s before the token is
+  used, 200s after) rather than only checking the old happy path.
+- `docs/PRD.md` §13 and `docs/DEMO.md` updated to describe both flows as
+  resolved; `docs/DEPLOYMENT.md`'s known-limitations list got the SMTP env
+  vars and a correction — its low-stock-in-application-code item was still
+  describing Day 18's state after Day 19 had already moved that query to raw
+  SQL, caught while editing the neighboring email paragraph.
+
+**Verified beyond the build/test commands:** real local Postgres
+(`pg_ctlcluster 16 main start`, created role/db/migrations from scratch —
+this sandbox had none of it yet), all three services running, driven
+through curl and a Playwright script covering both flows: (1) invite a
+Staff member via the Team page UI (confirmed the form has exactly two text
+inputs — no password field), pull the real link out of the backend's
+console log, land on `/reset-password` and confirm the invite-flavored
+heading/button text, set a password, confirm the login page's
+invite-accepted banner, and log in as that Staff user with the password
+they chose; (2) a curl-driven check that the account is genuinely locked —
+login with a guessed password 401s before the token is spent, and 200s
+right after; (3) forgot-password end to end, unchanged behavior after the
+token-helper extraction (202 → console link → 204 reset → 200 login with
+the new password).
+
+**Verified (all three services):** backend `npx tsc --noEmit`, `npm run
+lint`, full Jest suite (313/313, up from 310); python-service `python3 -m
+pytest -q` (44/44, unaffected by any change this session); frontend `npm
+run lint` and `npm run build`. All clean.
+
+**Next:**
+
+1. **Shared-state rate limiting**, unchanged as the next infrastructure
+   item — still in-process only, same as every entry since Day 14.
+2. Now that invites are emailed rather than Owner-set, the `docs/DEMO.md`
+   walkthrough should probably show the new flow rather than only
+   describing it in the "known gaps" section — a small doc-polish pickup,
+   not a code gap.
+3. Smaller, carried from Day 18/19: opportunistic real-Postgres
+   verification of anything landed on a session that lacked Postgres —
+   nothing currently on record needs this, but it's worth checking
+   `docs/PROGRESS.md`'s own history for it before assuming everything has
+   been checked for real.
+
+**Blockers/decisions carried forward:**
+
+- Still no real SMTP credentials configured anywhere — this session shipped
+  the seam (and proved both branches work, including the SMTP one via a
+  mocked transport), but nobody has picked an actual provider or paid for
+  one. That's a genuine business decision, not an engineering gap, and
+  reasonable to leave for a human once there's a real customer to send mail
+  to.
+- Did not add rate limiting to the invite endpoint itself. Unlike
+  forgot-password (unauthenticated, so the only real access control is the
+  rate limit), `POST /api/users` already requires an authenticated Owner —
+  the existing per-endpoint auth is the access control, and an Owner
+  spamming their own team's inboxes isn't a threat model this product
+  needs to defend against.

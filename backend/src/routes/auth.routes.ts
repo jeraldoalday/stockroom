@@ -1,4 +1,3 @@
-import crypto from "crypto";
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
@@ -7,7 +6,7 @@ import { requireAuth } from "../middleware/auth";
 import { ApiError } from "../lib/errors";
 import { env } from "../lib/env";
 import { emailSender } from "../lib/email";
-import { hashPassword, signAccessToken, verifyPassword } from "../lib/auth";
+import { generateOpaqueToken, hashOpaqueToken, hashPassword, signAccessToken, verifyPassword } from "../lib/auth";
 import { rateLimit } from "../lib/rateLimit";
 import {
   issueRefreshToken,
@@ -312,10 +311,6 @@ router.patch(
 
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
 
-function hashResetToken(token: string): string {
-  return crypto.createHash("sha256").update(token).digest("hex");
-}
-
 const forgotPasswordSchema = z.object({ email: z.string().email() });
 
 // Always responds 202 whether or not the email matches an account — telling
@@ -331,7 +326,7 @@ router.post(
 
     const user = await prisma.user.findFirst({ where: { email } });
     if (user) {
-      const token = crypto.randomBytes(32).toString("hex");
+      const token = generateOpaqueToken();
       await prisma.$transaction(async (tx) => {
         // Superseding a stale link on every new request keeps at most one
         // usable reset token per user, same reasoning as the invite flow's
@@ -343,7 +338,7 @@ router.post(
         await tx.passwordResetToken.create({
           data: {
             userId: user.id,
-            tokenHash: hashResetToken(token),
+            tokenHash: hashOpaqueToken(token),
             expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS),
           },
         });
@@ -373,7 +368,7 @@ router.post(
     const body = resetPasswordSchema.parse(req.body);
 
     const resetToken = await prisma.passwordResetToken.findUnique({
-      where: { tokenHash: hashResetToken(body.token) },
+      where: { tokenHash: hashOpaqueToken(body.token) },
     });
     if (!resetToken || resetToken.usedAt || resetToken.expiresAt < new Date()) {
       throw ApiError.badRequest("This reset link is invalid or has expired");

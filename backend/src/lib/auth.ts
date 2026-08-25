@@ -55,3 +55,16 @@ export function verifyAccessToken(token: string): AccessTokenPayload {
 export function verifyRefreshToken(token: string): { sub: string } {
   return jwt.verify(token, env.jwtRefreshSecret) as { sub: string };
 }
+
+// Shared by the forgot-password flow and the team-invite flow: both hand a
+// user a one-time link that lands on `/reset-password`, and both need the
+// same "generate an opaque token, store only its hash" shape. Keeping this
+// in one place means the two call sites can't quietly drift onto different
+// hashing schemes the way two independently-written copies eventually do.
+export function generateOpaqueToken(): string {
+  return crypto.randomBytes(32).toString("hex");
+}
+
+export function hashOpaqueToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}

@@ -8,6 +8,7 @@ export function ResetPasswordPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token") ?? "";
+  const isInvite = searchParams.get("type") === "invite";
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -23,7 +24,9 @@ export function ResetPasswordPage() {
     setSubmitting(true);
     try {
       await resetPassword(token, newPassword);
-      navigate("/login", { state: { resetSuccess: true } });
+      navigate("/login", {
+        state: isInvite ? { inviteAccepted: true } : { resetSuccess: true },
+      });
     } catch (err) {
       setError(isApiError(err) ? err.response?.data?.error ?? "Could not reset password" : "Could not reset password");
     } finally {
@@ -34,12 +37,20 @@ export function ResetPasswordPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <div className="w-full max-w-sm bg-white p-8 rounded-lg shadow">
-        <h1 className="text-xl font-semibold text-brand-700 mb-6">Choose a new password</h1>
+        <h1 className="text-xl font-semibold text-brand-700 mb-6">
+          {isInvite ? "Welcome to StockRoom — set your password" : "Choose a new password"}
+        </h1>
 
         {!token ? (
           <p className="text-sm text-red-600">
-            This reset link is missing its token. Request a new one from the{" "}
-            <Link to="/forgot-password" className="text-brand-600 hover:underline">forgot password</Link> page.
+            {isInvite
+              ? "This invite link is missing its token. Ask whoever invited you to send a new one."
+              : (
+                <>
+                  This reset link is missing its token. Request a new one from the{" "}
+                  <Link to="/forgot-password" className="text-brand-600 hover:underline">forgot password</Link> page.
+                </>
+              )}
           </p>
         ) : (
           <form onSubmit={handleSubmit}>
@@ -70,7 +81,7 @@ export function ResetPasswordPage() {
               disabled={submitting}
               className="w-full rounded-md bg-brand-600 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
             >
-              {submitting ? "Resetting..." : "Reset password"}
+              {submitting ? "Saving..." : isInvite ? "Set password" : "Reset password"}
             </button>
           </form>
         )}

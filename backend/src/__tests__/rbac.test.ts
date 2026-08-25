@@ -3,6 +3,7 @@ import request from "supertest";
 jest.mock("../lib/prisma");
 
 import { resetPrismaMock } from "./testUtils/prismaMock";
+import { inviteAndSetPassword } from "./testUtils/invite";
 import { createApp } from "../app";
 
 const app = createApp();
@@ -22,10 +23,7 @@ async function signUpAndGetToken(email: string, orgName: string) {
 }
 
 async function inviteStaffAndLogin(ownerToken: string, email: string) {
-  await request(app)
-    .post("/api/users")
-    .set("Authorization", `Bearer ${ownerToken}`)
-    .send({ name: "Clerk", email, password: "hunter22222", role: "STAFF" });
+  await inviteAndSetPassword(app, ownerToken, { email, password: "hunter22222" });
   const login = await request(app).post("/api/auth/login").send({ email, password: "hunter22222" });
   return login.body.accessToken as string;
 }

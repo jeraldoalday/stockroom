@@ -3,6 +3,7 @@ import request from "supertest";
 jest.mock("../lib/prisma");
 
 import { resetPrismaMock } from "./testUtils/prismaMock";
+import { inviteAndSetPassword } from "./testUtils/invite";
 import { createApp } from "../app";
 
 const app = createApp();
@@ -56,10 +57,7 @@ describe("GET /api/reports/*", () => {
 
   it("tells the python service to drop cost data when a STAFF user exports products", async () => {
     const ownerToken = await signUpAndGetToken("owner8@shop.test", "Shop 8");
-    const invite = await request(app)
-      .post("/api/users")
-      .set("Authorization", `Bearer ${ownerToken}`)
-      .send({ name: "Clerk", email: "clerk8@shop.test", password: "hunter22222", role: "STAFF" });
+    const invite = await inviteAndSetPassword(app, ownerToken, { email: "clerk8@shop.test", password: "hunter22222" });
     const staffLogin = await request(app)
       .post("/api/auth/login")
       .send({ email: "clerk8@shop.test", password: "hunter22222" });
@@ -171,10 +169,7 @@ describe("GET /api/reports/dead-stock", () => {
     });
     const ownerToken = owner.body.accessToken as string;
 
-    await request(app)
-      .post("/api/users")
-      .set("Authorization", `Bearer ${ownerToken}`)
-      .send({ name: "Clerk", email: "clerk-dead@shop.test", password: "hunter22222", role: "STAFF" });
+    await inviteAndSetPassword(app, ownerToken, { email: "clerk-dead@shop.test", password: "hunter22222" });
 
     const staff = await request(app)
       .post("/api/auth/login")
@@ -236,10 +231,7 @@ describe("GET /api/reports/export/dead-stock", () => {
     });
     const ownerToken = owner.body.accessToken as string;
 
-    await request(app)
-      .post("/api/users")
-      .set("Authorization", `Bearer ${ownerToken}`)
-      .send({ name: "Clerk", email: "clerk-dead-export@shop.test", password: "hunter22222", role: "STAFF" });
+    await inviteAndSetPassword(app, ownerToken, { email: "clerk-dead-export@shop.test", password: "hunter22222" });
 
     const staff = await request(app)
       .post("/api/auth/login")

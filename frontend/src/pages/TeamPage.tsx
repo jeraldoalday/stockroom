@@ -55,7 +55,6 @@ export function TeamPage() {
     inviteMutation.mutate({
       name: String(form.get("name")),
       email: String(form.get("email")),
-      password: String(form.get("password")),
       role: (form.get("role") as UserRole) || "STAFF",
     });
   }
@@ -84,30 +83,23 @@ export function TeamPage() {
             <label className="block text-sm font-medium text-gray-700">Email</label>
             <input name="email" type="email" required className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Temporary password</label>
-            <input
-              name="password"
-              type="password"
-              required
-              minLength={8}
-              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            />
-          </div>
-          <div>
+          <div className="col-span-2">
             <label className="block text-sm font-medium text-gray-700">Role</label>
             <select name="role" defaultValue="STAFF" className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm">
               <option value="STAFF">Staff</option>
               <option value="OWNER">Owner</option>
             </select>
           </div>
+          <p className="col-span-2 text-xs text-gray-500">
+            They'll get an email with a link to set their own password. It's valid for 7 days.
+          </p>
           <div className="col-span-2">
             <button
               type="submit"
               disabled={inviteMutation.isPending}
               className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
             >
-              {inviteMutation.isPending ? "Saving..." : "Send invite"}
+              {inviteMutation.isPending ? "Sending..." : "Send invite"}
             </button>
           </div>
         </form>

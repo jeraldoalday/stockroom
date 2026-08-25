@@ -77,7 +77,7 @@ describe("passwordHash never reaches a client", () => {
     await request(app)
       .post("/api/users")
       .set(auth)
-      .send({ name: "Clerk", email: "clerk@shop.test", password: "hunter22222", role: "STAFF" });
+      .send({ name: "Clerk", email: "clerk@shop.test", role: "STAFF" });
 
     const users = await request(app).get("/api/users").set(auth);
     expect(users.status).toBe(200);

@@ -13,7 +13,9 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const resetSuccess = Boolean((location.state as { resetSuccess?: boolean } | null)?.resetSuccess);
+  const locationState = location.state as { resetSuccess?: boolean; inviteAccepted?: boolean } | null;
+  const resetSuccess = Boolean(locationState?.resetSuccess);
+  const inviteAccepted = Boolean(locationState?.inviteAccepted);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -38,6 +40,11 @@ export function LoginPage() {
         {resetSuccess && (
           <div className="mb-4 text-sm text-green-700">
             Your password has been reset. Sign in with your new password.
+          </div>
+        )}
+        {inviteAccepted && (
+          <div className="mb-4 text-sm text-green-700">
+            Your password is set. Sign in to get started.
           </div>
         )}
         {error && <div className="mb-4 text-sm text-red-600">{error}</div>}

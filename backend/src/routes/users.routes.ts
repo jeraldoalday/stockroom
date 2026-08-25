@@ -4,7 +4,9 @@ import { prisma } from "../lib/prisma";
 import { asyncHandler } from "../lib/asyncHandler";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { ApiError } from "../lib/errors";
-import { hashPassword } from "../lib/auth";
+import { env } from "../lib/env";
+import { emailSender } from "../lib/email";
+import { generateOpaqueToken, hashOpaqueToken, hashPassword } from "../lib/auth";
 
 const router = Router();
 router.use(requireAuth);
@@ -32,13 +34,28 @@ router.get(
 const inviteSchema = z.object({
   name: z.string().min(1).max(120),
   email: z.string().email(),
-  password: z.string().min(8).max(72),
   role: z.enum(["OWNER", "STAFF"]).default("STAFF"),
 });
+
+// A week is generous for someone to get to their inbox and click through,
+// longer than the 1-hour forgot-password link since that one guards an
+// account someone can already get into another way (they know the old
+// password); an invite is the only way in for a brand-new member.
+const INVITE_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 // Signup (auth.routes.ts) always creates an Owner for a brand-new
 // organization; this is the only way to add any other user — Staff or a
 // second Owner — to an org that already exists.
+//
+// The Owner no longer chooses the new member's password. That used to mean
+// the Owner learned (and had to relay, out of band) a real credential for
+// someone else's account, with no way for that person to prove they'd ever
+// seen it. Instead the account is created locked — its password hash is a
+// random value nobody, including the Owner, knows — and this reuses the
+// same one-time-link machinery as forgot-password (lib/auth's
+// generateOpaqueToken/hashOpaqueToken, the PasswordResetToken table, and
+// `/api/auth/reset-password` itself all treat "set a password from a mailed
+// link" identically whether the link came from an invite or a reset).
 router.post(
   "/",
   asyncHandler(async (req, res) => {
@@ -53,9 +70,27 @@ router.post(
       throw ApiError.conflict("An account with this email already exists");
     }
 
-    const passwordHash = await hashPassword(body.password);
-    const user = await prisma.user.create({
-      data: { organizationId, email, name: body.name, passwordHash, role: body.role },
+    const passwordHash = await hashPassword(generateOpaqueToken());
+    const token = generateOpaqueToken();
+    const user = await prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: { organizationId, email, name: body.name, passwordHash, role: body.role },
+      });
+      await tx.passwordResetToken.create({
+        data: {
+          userId: user.id,
+          tokenHash: hashOpaqueToken(token),
+          expiresAt: new Date(Date.now() + INVITE_TOKEN_TTL_MS),
+        },
+      });
+      return user;
+    });
+
+    const inviteUrl = `${env.corsOrigin}/reset-password?token=${token}&type=invite`;
+    await emailSender.send({
+      to: user.email,
+      subject: "You've been invited to StockRoom",
+      text: `You've been invited to join a StockRoom organization as ${body.role === "OWNER" ? "an Owner" : "a Staff member"}.\n\nSet your password here (valid for 7 days): ${inviteUrl}\n\nIf you weren't expecting this, you can ignore this email.`,
     });
 
     res.status(201).json(toPublicUser(user));

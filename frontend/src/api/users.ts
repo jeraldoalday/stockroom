@@ -9,7 +9,6 @@ export async function fetchTeamMembers(): Promise<TeamMemberListResponse> {
 export interface InviteUserPayload {
   name: string;
   email: string;
-  password: string;
   role: UserRole;
 }
 

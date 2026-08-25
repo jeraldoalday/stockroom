@@ -3,6 +3,7 @@ import request from "supertest";
 jest.mock("../lib/prisma");
 
 import { resetPrismaMock } from "./testUtils/prismaMock";
+import { inviteAndSetPassword } from "./testUtils/invite";
 import { createApp } from "../app";
 
 const app = createApp();
@@ -167,10 +168,8 @@ describe("SALE movements carry the price charged", () => {
       .set(auth)
       .send({ productId, locationId, type: "SALE", quantity: 1, unitPriceCents: 1999 });
 
-    await request(app)
-      .post("/api/users")
-      .set(auth)
-      .send({ name: "Clerk", email: "clerk@shop.test", password: "hunter22222", role: "STAFF" });
+    const ownerToken = auth.Authorization.replace("Bearer ", "");
+    await inviteAndSetPassword(app, ownerToken, { email: "clerk@shop.test", password: "hunter22222" });
     const staffLogin = await request(app)
       .post("/api/auth/login")
       .send({ email: "clerk@shop.test", password: "hunter22222" });

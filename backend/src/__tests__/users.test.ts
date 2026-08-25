@@ -3,6 +3,8 @@ import request from "supertest";
 jest.mock("../lib/prisma");
 
 import { resetPrismaMock } from "./testUtils/prismaMock";
+import { inviteAndSetPassword } from "./testUtils/invite";
+import { emailSender } from "../lib/email";
 import { createApp } from "../app";
 
 const app = createApp();
@@ -22,10 +24,7 @@ async function signUpAndGetToken(email: string, orgName: string) {
 }
 
 async function inviteStaff(ownerToken: string, email: string) {
-  const res = await request(app)
-    .post("/api/users")
-    .set("Authorization", `Bearer ${ownerToken}`)
-    .send({ name: "Clerk", email, password: "hunter22222", role: "STAFF" });
+  const res = await inviteAndSetPassword(app, ownerToken, { email, password: "hunter22222" });
   return res.body as { id: string };
 }
 
@@ -40,22 +39,40 @@ describe("Users (team management) API", () => {
     expect(res.status).toBe(401);
   });
 
-  it("lets an Owner invite a Staff user who can then log in", async () => {
+  it("creates an invited Staff account locked, then lets them set a password from the emailed link and log in", async () => {
     const owner = await signUpAndGetToken("owner@shop.test", "The Shop");
 
+    // Nobody, including the Owner, ever chooses or sees this account's
+    // password: it's created locked, and the only way in is the token
+    // emailed to the invited address.
+    const emailSpy = jest.spyOn(emailSender, "send").mockResolvedValue(undefined);
     const invite = await request(app)
       .post("/api/users")
       .set("Authorization", `Bearer ${owner.accessToken}`)
-      .send({ name: "Clerk", email: "clerk@shop.test", password: "hunter22222", role: "STAFF" });
+      .send({ name: "Clerk", email: "clerk@shop.test", role: "STAFF" });
     expect(invite.status).toBe(201);
     expect(invite.body.role).toBe("STAFF");
     expect(invite.body).not.toHaveProperty("passwordHash");
+    expect(emailSpy).toHaveBeenCalledTimes(1);
+    expect(emailSpy.mock.calls[0][0].to).toBe("clerk@shop.test");
 
-    const login = await request(app)
+    const loginBeforeSet = await request(app)
       .post("/api/auth/login")
       .send({ email: "clerk@shop.test", password: "hunter22222" });
-    expect(login.status).toBe(200);
-    expect(login.body.user.role).toBe("STAFF");
+    expect(loginBeforeSet.status).toBe(401);
+
+    const token = emailSpy.mock.calls[0][0].text.match(/token=([a-f0-9]+)/)?.[1];
+    emailSpy.mockRestore();
+    const setPassword = await request(app)
+      .post("/api/auth/reset-password")
+      .send({ token, newPassword: "hunter22222" });
+    expect(setPassword.status).toBe(204);
+
+    const loginAfter = await request(app)
+      .post("/api/auth/login")
+      .send({ email: "clerk@shop.test", password: "hunter22222" });
+    expect(loginAfter.status).toBe(200);
+    expect(loginAfter.body.user.role).toBe("STAFF");
   });
 
   it("blocks a STAFF user from managing the team", async () => {
@@ -69,7 +86,7 @@ describe("Users (team management) API", () => {
     const invite = await request(app)
       .post("/api/users")
       .set("Authorization", `Bearer ${staffToken}`)
-      .send({ name: "Another", email: "another2@shop.test", password: "hunter22222" });
+      .send({ name: "Another", email: "another2@shop.test" });
     expect(invite.status).toBe(403);
   });
 
@@ -91,7 +108,7 @@ describe("Users (team management) API", () => {
     const res = await request(app)
       .post("/api/users")
       .set("Authorization", `Bearer ${owner.accessToken}`)
-      .send({ name: "Dup", email: "owner3@shop.test", password: "hunter22222" });
+      .send({ name: "Dup", email: "owner3@shop.test" });
     expect(res.status).toBe(409);
   });
 

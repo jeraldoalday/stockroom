@@ -25,4 +25,23 @@ export const env = {
   // only to this API); these let the reports routes proxy to it internally.
   pythonServiceUrl: process.env.PYTHON_SERVICE_URL ?? "http://localhost:8000",
   pythonServiceInternalKey: process.env.PYTHON_SERVICE_INTERNAL_KEY ?? "dev-internal-key",
+  smtp: buildSmtpConfig(),
 };
+
+// SMTP is opt-in: unset SMTP_HOST and the app falls back to logging emails
+// to the console (see lib/email.ts), same as every session before this one.
+// Set it to switch on real delivery through any provider that speaks SMTP.
+function buildSmtpConfig() {
+  const host = process.env.SMTP_HOST;
+  if (!host) {
+    return undefined;
+  }
+  return {
+    host,
+    port: Number(process.env.SMTP_PORT ?? 587),
+    secure: process.env.SMTP_SECURE === "true",
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+    from: process.env.SMTP_FROM ?? "StockRoom <no-reply@stockroom.app>",
+  };
+}

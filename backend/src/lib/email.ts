@@ -1,11 +1,15 @@
-// No transactional email provider is configured anywhere in this stack
-// (no SMTP/API key in any .env.example, nothing in the PRD's env list) —
-// same gap noted since Day 13's invite flow and Day 15's password-change
-// entry in docs/PROGRESS.md. This interface is the seam a real provider
-// (SendGrid/Postmark/SES/...) plugs into later: implement EmailSender and
-// swap the `emailSender` export below, and nothing calling send() needs to
-// change. Until then, ConsoleEmailSender logs the message so local dev and
-// demos can read reset links straight out of the server console.
+import nodemailer from "nodemailer";
+import { env } from "./env";
+
+// The seam a real transactional-email path plugs into. Implement
+// EmailSender and swap `emailSender` below; nothing calling send() needs to
+// change. `SmtpEmailSender` is deliberately generic SMTP rather than a named
+// provider's own SDK — SendGrid, Postmark, SES, and Mailgun all speak SMTP
+// as well as their own API, so one implementation covers any of them
+// without betting this codebase on a specific vendor's client library. Set
+// `SMTP_HOST` (see `.env.example`) to switch it on; unset, this falls back
+// to logging the message so local dev and demos can read reset/invite links
+// straight out of the server console, same as before.
 export interface EmailMessage {
   to: string;
   subject: string;
@@ -24,4 +28,35 @@ class ConsoleEmailSender implements EmailSender {
   }
 }
 
-export const emailSender: EmailSender = new ConsoleEmailSender();
+class SmtpEmailSender implements EmailSender {
+  private transport: ReturnType<typeof nodemailer.createTransport>;
+  private from: string;
+
+  constructor(config: { host: string; port: number; secure: boolean; user?: string; pass?: string; from: string }) {
+    this.transport = nodemailer.createTransport({
+      host: config.host,
+      port: config.port,
+      secure: config.secure,
+      auth: config.user ? { user: config.user, pass: config.pass } : undefined,
+    });
+    this.from = config.from;
+  }
+
+  async send(message: EmailMessage): Promise<void> {
+    await this.transport.sendMail({
+      from: this.from,
+      to: message.to,
+      subject: message.subject,
+      text: message.text,
+    });
+  }
+}
+
+function buildEmailSender(): EmailSender {
+  if (!env.smtp) {
+    return new ConsoleEmailSender();
+  }
+  return new SmtpEmailSender(env.smtp);
+}
+
+export const emailSender: EmailSender = buildEmailSender();

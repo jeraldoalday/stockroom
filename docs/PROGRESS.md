@@ -1546,3 +1546,137 @@ run lint` and `npm run build`. All clean.
   the existing per-endpoint auth is the access control, and an Owner
   spamming their own team's inboxes isn't a threat model this product
   needs to defend against.
+
+## Day 21 (post-MVP) — 2026-08-26
+
+**Planned:** the top of the Day 20 "Next" list — shared-state rate
+limiting, unchanged as the next infrastructure item across five straight
+entries since Day 14. Also picked up item 2 (show the new invite flow in
+`docs/DEMO.md`, not just describe it) and item 3 (check `docs/PROGRESS.md`'s
+own history for anything landed on a Postgres-less session that still needs
+real verification).
+
+**Shipped — shared-state rate limiting:**
+
+- `lib/rateLimit.ts`'s login/signup/forgot-password/reset-password limiters
+  moved from an in-process `Map` to a `rate_limit_buckets` Postgres table.
+  The reason this mattered: two API instances behind a load balancer each
+  kept their own counter, so an attacker got `limit` attempts *per
+  instance* rather than in total — the exact gap flagged in every entry
+  since Day 14 and called out by name in two other files' own comments
+  (`lib/tokenPruning.ts`, `scripts/pruneTokens.ts`) as the thing still
+  needing this fix.
+- Chose Postgres over Redis for the same reason the SMTP decision on Day 20
+  chose generic SMTP over a vendor SDK: this project has no other use for a
+  second store, and the database everything else already lives in does the
+  job. A single `INSERT ... ON CONFLICT ("key") DO UPDATE` does the
+  window-expired check and the increment in one atomic round trip — two
+  requests racing to open a fresh window against the same key serialize on
+  Postgres's own conflict resolution rather than both resetting the counter
+  to 1, which a naive read-then-write would have allowed.
+- Each limiter now takes a `name` (`"login"`, `"signup"`, ...) that prefixes
+  every bucket key. Necessary once the buckets share one table: login and
+  forgot-password both key on `ip:email`, and without a prefix the two
+  limiters would silently share counters — failing a login attempt would
+  eat into the separate forgot-password budget for the same address.
+- Expired buckets aren't deleted by the limiter itself. `lib/tokenPruning.ts`
+  (the hourly sweep that already prunes refresh and password-reset tokens)
+  now prunes `rate_limit_buckets` too, and `PruneResult` grew a
+  `rateLimitBuckets` count. A stale bucket has none of the security
+  subtlety a revoked-but-live refresh token has — the next hit against it
+  starts a fresh window regardless of whether the row still exists — so it
+  needed no reasoning beyond "reuse the sweep already wired into
+  `server.ts` and `npm run prune:tokens` rather than add a second timer."
+- The pure `RateLimiter` class is gone; `hitRateLimit`/`resetRateLimit` are
+  now the primitive, both taking an injectable `now` the same way the old
+  class did, so the window-rollover unit tests moved over without losing
+  their point (exercised against the mocked upsert in
+  `lib/__mocks__/prisma.ts` rather than an in-memory class).
+- Removed `testUtils/setupTests.ts` and its `setupFilesAfterEnv` entry in
+  `jest.config.js`. It existed only to clear the old limiters' module-level
+  singletons between tests in the same file; now that bucket state lives in
+  the (mocked) database, every route-test file's own
+  `beforeEach(() => resetPrismaMock())` already clears it, since
+  `resetPrismaMock()` resets every table including the new
+  `rateLimitBucket` one. Confirmed the four test files that don't mock
+  Prisma at all (`email`, `errorHandler`, `packageManifest`,
+  `rbac.unit`) never drive an HTTP request in the first place, so nothing
+  there depended on the removed hook.
+- 7 new/rewritten backend tests for `hitRateLimit`/`resetRateLimit`, plus 2
+  new `tokenPruning.test.ts` cases for the bucket sweep (past its window vs.
+  still inside the grace period). 315 tests total (was 313 — 6 old
+  `RateLimiter` class tests replaced by 7, plus 2 new pruning tests, net
+  +2... the exact delta matters less than that every case the old class
+  covered still has an equivalent).
+
+**Verified beyond the build/test commands:** real local Postgres
+(`pg_ctlcluster 16 main start`, created the `stockroom` role/db and the
+`stockroom_readonly` role from scratch — this sandbox had none of it yet),
+ran `prisma migrate dev --name add_rate_limit_buckets` against it (needed
+`ALTER ROLE stockroom CREATEDB` first for Prisma's shadow database), and
+confirmed the atomicity claim isn't just asserted: hit the real `/login`
+endpoint 11 times via curl and read `rate_limit_buckets` back with `psql` —
+count 11, one row, keyed `login:127.0.0.1:<email>` — then a `curl` against
+`/signup` from the same IP produced a *separate* `signup:127.0.0.1` row,
+confirming the per-limiter prefix actually prevents cross-limiter sharing
+rather than only being asserted by a mocked test. Also drove the full flow
+through a real browser: Playwright script signing up a fresh account,
+failing login 10 times through the actual login form, and confirming
+attempt 11 renders the "Too many sign-in attempts" message on the page
+(not just a raw 429 in a network tab) — then confirmed a successful login
+for a *different* fresh account correctly resets its own bucket to nothing
+via `psql`, and that the sweep script (`npm run prune:tokens`) deletes a
+manually-inserted stale bucket but reports 0 for a bucket only a few
+minutes past its window (inside the 1-hour grace period). python-service
+was pointed back at `stockroom_readonly` (the readonly-role script needed
+re-running in this fresh sandbox too) and its `/health` reported
+`"database":"connected"`, confirming this session's schema change didn't
+disturb that role's grants.
+
+**Shipped — doc fixes found while updating the rate-limiting entries:**
+
+- `docs/DEMO.md`'s "If you have five more minutes" section gained an
+  "Inviting a Staff member" bullet driving the actual emailed-link flow
+  (Day 20) live, rather than only describing it in "Known gaps, if asked" —
+  the item Day 20 flagged as a doc-polish pickup rather than a code gap.
+- `docs/PRD.md` §13 had a stale entry: it still said the dashboard's
+  low-stock comparison was "left in application code," which Day 19 had
+  already moved to raw SQL — `docs/DEPLOYMENT.md`'s matching entry was
+  corrected for exactly this on Day 20, but the parallel note in PRD.md was
+  missed. Caught only because updating the neighboring rate-limiting entry
+  meant re-reading the whole list.
+- `docs/DEPLOYMENT.md` and `docs/PRD.md`'s rate-limiting entries both
+  updated from "known limitation" to resolved, following the same
+  strikethrough-and-explain convention the email and dashboard-aggregate
+  entries already used.
+
+**Verified (all three services):** backend `npx tsc --noEmit`, `npm run
+lint`, full Jest suite (315/315, up from 313); python-service `python3 -m
+pytest -q` (44/44, unaffected — no changes there this session); frontend
+`npm run lint` and `npm run build`. All clean.
+
+**Next:**
+
+1. Nothing is currently flagged as the clear top item the way transactional
+   email and shared-state rate limiting were across the last several
+   entries — both of the two standing infrastructure gaps from the Day 14
+   sign-off list are now resolved. Reasonable next slices, roughly in order:
+   revocable access tokens (still bearer-only, 15-minute exposure window
+   after any revocation); a per-session-list-style UI for ending a *specific*
+   rate-limited lockout early (today only a successful login clears one, an
+   Owner has no way to unblock a locked-out Staff member without waiting out
+   the window); moving the token/rate-limit prune sweep off the in-process
+   timer and onto the documented cron path for a real multi-instance deploy.
+2. Smaller: the `rate_limit_buckets` table has no index beyond its primary
+   key, which is also its lookup key, so this isn't a gap — noting only that
+   if a future limiter ever needed to query buckets by anything other than
+   exact key (e.g. "all buckets for this IP across limiters" for an admin
+   unlock tool), it would need one.
+
+**Blockers/decisions carried forward:**
+
+- None new. The two decisions this session made — Postgres over Redis for
+  the shared store, and reusing the existing token-pruning sweep rather than
+  a second timer — both follow precedent already set elsewhere in this
+  codebase (SMTP over a vendor SDK, the dashboard's existing raw-SQL
+  pattern) rather than introducing a new kind of choice.

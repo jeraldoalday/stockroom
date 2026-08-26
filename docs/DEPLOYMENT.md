@@ -146,12 +146,6 @@ These are real and currently unaddressed. They are listed here rather than
 in an issue tracker because each one silently changes behaviour when you
 add a second instance.
 
-- **Rate limiting is per-process.** The login and signup limiters
-  (`src/lib/rateLimit.ts`) keep counters in an in-memory Map. Two API
-  instances behind a load balancer means an attacker gets 2× the attempts,
-  and counters reset on every deploy. This is an accepted trade for a
-  single-container MVP; moving to more than one instance means moving the
-  counters to Redis or the database first.
 - **Access tokens are not revocable.** Refresh tokens now are: they rotate
   on every use, are recorded server-side by hash, and are revoked by signing
   out or by any password change, with a replayed token burning its whole
@@ -160,15 +154,16 @@ add a second instance.
   minutes by default) to be fully effective. That window is the reason to
   keep the TTL short; shortening it further trades refresh traffic for a
   smaller exposure.
-- **Token pruning is per-process.** Expired refresh and password-reset rows
-  are deleted on a timer inside each API process
-  (`TOKEN_PRUNE_INTERVAL_MS`), so two instances both sweep — harmless, but
-  wasteful, and it is the same single-instance assumption the rate limiter
-  makes. Behind a load balancer, set the interval high or disable it and run
-  `npm run prune:tokens` from cron instead. Note what the sweep deliberately
-  keeps: a revoked refresh token that has not yet expired is the
-  reuse detector, and deleting those early would turn a replayed token into
-  an ordinary 401 with the rest of the attacker's family still working.
+- **Token and rate-limit pruning is per-process.** Expired refresh,
+  password-reset, and rate-limit-bucket rows are deleted on a timer inside
+  each API process (`TOKEN_PRUNE_INTERVAL_MS`), so two instances both
+  sweep — harmless (`deleteMany` on an already-deleted row is a no-op), but
+  redundant work. Behind a load balancer, set the interval high or disable
+  it and run `npm run prune:tokens` from cron instead. Note what the sweep
+  deliberately keeps: a revoked refresh token that has not yet expired is
+  the reuse detector, and deleting those early would turn a replayed token
+  into an ordinary 401 with the rest of the attacker's family still
+  working.
 - **No email provider configured by default.** `EmailSender` (`lib/email.ts`)
   has a real SMTP implementation now, used automatically once `SMTP_HOST` is
   set (see the env var table above) — works with any provider that speaks
@@ -183,6 +178,17 @@ add a second instance.
   instance, including the zero-inventory-row case. No known limitation left
   here; keeping this line only long enough to note it moved off the
   application-code list a session after the one above described it.
+- **Rate limiting is now shared state, not per-process.** The login, signup,
+  forgot-password and reset-password limiters (`src/lib/rateLimit.ts`) keep
+  their counters in a `rate_limit_buckets` Postgres table instead of an
+  in-memory Map, via one atomic `INSERT ... ON CONFLICT DO UPDATE` per hit —
+  so two API instances behind a load balancer now share the same budget
+  instead of each attacker getting `limit` attempts per instance. Verified
+  against a real Postgres instance, including that two limiters keying on
+  the same `ip:email` string (login and forgot-password) don't share a
+  counter. No known limitation left here; keeping this line only long enough
+  to note it moved off the per-process list a session after the one above
+  described it.
 - **No structured logging, metrics or error reporting.** Errors go to
   `console.error` and unhandled 500s carry no request id, so a production
   failure is only diagnosable if you happen to be tailing the logs.

@@ -199,19 +199,23 @@ blocking for a design-partner pilot:
   signing out or by any password change. Access tokens are still bearer
   tokens with a 15-minute life and no server-side check, so a revocation
   takes up to that long to be complete.
-- **Rate limiting is per-process**, so it weakens as soon as there is more
-  than one API instance.
+- ~~**Rate limiting is per-process**, so it weakens as soon as there is more
+  than one API instance.~~ **Resolved (Day 21):** the login, signup,
+  forgot-password and reset-password limiters keep their counters in a
+  `rate_limit_buckets` Postgres table via one atomic upsert per hit, so
+  every API instance shares the same budget instead of each getting its own.
 - ~~**Revenue is only attributed to sales made through a sales order.**~~
   **Resolved (Day 17):** `StockMovement.unitPriceCents` records what a sale
   went out at, and the trend report prefers it over the order line.
   Movements written before that column existed still have no price of their
   own and continue to fall back to the line.
 - ~~**Dashboard aggregates are computed in application code**, not SQL.~~
-  **Resolved (Day 18):** the sums are GROUP BY queries. What is left in
-  application code is the low-stock *comparison* — a predicate across
-  products and inventory that Prisma's query builder can't express — so
-  every active product is still listed to make it. Within the 10k SKU
-  target in §7.
+  **Resolved (Day 18-19):** the sums are GROUP BY queries, and the low-stock
+  *comparison* — a predicate across products and inventory that Prisma's
+  query builder can't express — is now one raw SQL query per endpoint
+  (Day 19) rather than reading every active product into JS. This entry
+  previously said the comparison was still application-code; that was stale
+  by one day, caught while updating the entry above.
 - **The read-only DB role for the Python service** is provisioned
   automatically in local dev (`db/init/01-create-readonly-role.sql`); a
   production deploy still has to create it, using

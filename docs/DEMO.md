@@ -197,6 +197,17 @@ and it's the one worth demonstrating rather than asserting.
   from here — the private window is signed out on its next request. This is
   the answer to "I signed in on the machine at the shop and I'm not there
   any more", which until now needed a password change to fix.
+- **Inviting a Staff member.** As the Owner, go to **Team** and invite
+  someone by name and email — notice there's no password field. The account
+  is created locked; nobody, including the Owner, ever sees a credential for
+  it. With no `SMTP_HOST` configured, the invite link is logged to the
+  backend's console instead of emailed — open it, and the page reads "Welcome
+  to StockRoom — set your password" rather than the reset-flavored copy,
+  since the backend and the page treat an invite and a password reset as the
+  same action ("prove you hold this link, choose a password") wearing
+  different words. Signing in with a guessed password before the link is
+  used gets a plain 401: the account is genuinely locked, not just missing a
+  UI to set a password from.
 
 ## Intentionally out of scope for this demo
 
@@ -217,7 +228,9 @@ both flows still work end to end for a demo, just by reading the link out
 of the log instead of an inbox. Signing out and any password change now
 revoke the session
 server-side, though an already-issued access token stays valid for up to
-15 minutes. Rate limiting is per-process and weakens behind a load
-balancer. Expired token rows are now swept on a timer inside the API
-process, which is one more thing that wants moving out of the process
-before there is a second one.
+15 minutes. Rate limiting keeps its counters in Postgres now rather than a
+per-process Map, so it holds up behind a load balancer. Expired token and
+rate-limit rows are swept on a timer inside the API process; that's still
+per-process, so two instances both sweep redundantly (harmless, since a
+delete on an already-gone row is a no-op) until it moves to a cron job
+running `npm run prune:tokens`.

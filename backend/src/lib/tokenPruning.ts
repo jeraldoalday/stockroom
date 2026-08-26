@@ -25,12 +25,20 @@ import { prisma } from "./prisma";
 // A grace period is applied on top so that a clock skew between the API and
 // the database can't delete a row that is still inside its last second of
 // life.
+//
+// The same sweep also clears expired rows from `rate_limit_buckets`
+// (lib/rateLimit.ts). Those have none of the reuse-detector subtlety above —
+// a bucket past its window is inert the moment the next hit arrives, since
+// that hit resets it regardless — but reusing this timer and this cron job
+// means the shared-state rate limiter didn't need a second sweep mechanism
+// of its own.
 
 export const PRUNE_GRACE_MS = 60 * 60 * 1000; // 1 hour
 
 export interface PruneResult {
   refreshTokens: number;
   passwordResetTokens: number;
+  rateLimitBuckets: number;
 }
 
 /**
@@ -42,7 +50,7 @@ export interface PruneResult {
 export async function pruneExpiredTokens(now: Date = new Date()): Promise<PruneResult> {
   const cutoff = new Date(now.getTime() - PRUNE_GRACE_MS);
 
-  const [refreshTokens, passwordResetTokens] = await Promise.all([
+  const [refreshTokens, passwordResetTokens, rateLimitBuckets] = await Promise.all([
     prisma.refreshToken.deleteMany({ where: { expiresAt: { lt: cutoff } } }),
     // A reset token is single-use and short-lived. Once it is expired *or*
     // spent it is inert: the route checks both before honouring it, and
@@ -50,11 +58,13 @@ export async function pruneExpiredTokens(now: Date = new Date()): Promise<PruneR
     prisma.passwordResetToken.deleteMany({
       where: { OR: [{ expiresAt: { lt: cutoff } }, { usedAt: { lt: cutoff } }] },
     }),
+    prisma.rateLimitBucket.deleteMany({ where: { resetAt: { lt: cutoff } } }),
   ]);
 
   return {
     refreshTokens: refreshTokens.count,
     passwordResetTokens: passwordResetTokens.count,
+    rateLimitBuckets: rateLimitBuckets.count,
   };
 }
 
@@ -72,9 +82,9 @@ export interface PrunerHandle {
  * idle and the work is unordered with respect to any request.
  *
  * This is per-process, so two API instances both sweep. That is harmless —
- * `deleteMany` on already-deleted rows is a no-op — but it is the same
- * single-instance assumption the in-memory rate limiter makes, and when
- * this stack grows a second instance the sweep belongs in a cron job
+ * `deleteMany` on already-deleted rows is a no-op — but it is still
+ * duplicated work, and when this stack grows a second instance the sweep
+ * belongs in a cron job
  * calling `npm run prune:tokens` instead.
  *
  * A failure is logged and swallowed: the pruner is housekeeping, and taking
@@ -85,10 +95,11 @@ export function startTokenPruner(intervalMs: number, log = console.log): PrunerH
   async function sweep() {
     try {
       const result = await pruneExpiredTokens();
-      if (result.refreshTokens > 0 || result.passwordResetTokens > 0) {
+      if (result.refreshTokens > 0 || result.passwordResetTokens > 0 || result.rateLimitBuckets > 0) {
         log(
-          `Pruned ${result.refreshTokens} expired refresh token(s) and ` +
-            `${result.passwordResetTokens} spent password reset token(s)`
+          `Pruned ${result.refreshTokens} expired refresh token(s), ` +
+            `${result.passwordResetTokens} spent password reset token(s), and ` +
+            `${result.rateLimitBuckets} expired rate-limit bucket(s)`
         );
       }
     } catch (error) {

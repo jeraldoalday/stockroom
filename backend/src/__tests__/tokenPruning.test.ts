@@ -137,7 +137,37 @@ describe("pruneExpiredTokens", () => {
   });
 
   it("reports nothing to do on an empty table", async () => {
-    expect(await pruneExpiredTokens(now)).toEqual({ refreshTokens: 0, passwordResetTokens: 0 });
+    expect(await pruneExpiredTokens(now)).toEqual({
+      refreshTokens: 0,
+      passwordResetTokens: 0,
+      rateLimitBuckets: 0,
+    });
+  });
+
+  // A rate-limit bucket has none of the reuse-detector subtlety a revoked
+  // refresh token does: once its window has passed, the next hit against it
+  // starts a fresh window regardless of whether this row still exists. It's
+  // still swept on the same grace period as everything else here rather
+  // than immediately, since there's no benefit to a second cutoff rule.
+  it("deletes rate-limit buckets past their window", async () => {
+    await prisma.rateLimitBucket.create({ data: { key: "login:1.2.3.4", count: 10, resetAt: at(-48 * HOUR) } });
+    await prisma.rateLimitBucket.create({ data: { key: "login:5.6.7.8", count: 3, resetAt: at(HOUR) } });
+
+    const result = await pruneExpiredTokens(now);
+
+    expect(result.rateLimitBuckets).toBe(1);
+    const remaining = await prisma.rateLimitBucket.findMany({});
+    expect(remaining.map((row) => row.key)).toEqual(["login:5.6.7.8"]);
+  });
+
+  it("leaves a just-expired bucket inside the grace period", async () => {
+    await prisma.rateLimitBucket.create({
+      data: { key: "login:1.2.3.4", count: 1, resetAt: at(-PRUNE_GRACE_MS / 2) },
+    });
+
+    const result = await pruneExpiredTokens(now);
+
+    expect(result.rateLimitBuckets).toBe(0);
   });
 });
 

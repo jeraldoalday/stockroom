@@ -25,6 +25,7 @@ const router = Router();
 // it, while a credential-stuffing run against many accounts from one host
 // still gets throttled by the shared IP portion of the key.
 const loginLimiter = rateLimit({
+  name: "login",
   limit: 10,
   windowMs: 15 * 60 * 1000,
   keyGenerator: (req) => `${req.ip}:${String(req.body?.email ?? "").toLowerCase()}`,
@@ -32,6 +33,7 @@ const loginLimiter = rateLimit({
 });
 
 const signupLimiter = rateLimit({
+  name: "signup",
   limit: 5,
   windowMs: 60 * 60 * 1000,
   message: "Too many accounts created from this address. Please try again later.",
@@ -45,6 +47,7 @@ const signupLimiter = rateLimit({
 // shared office address shouldn't be able to lock a colleague out of
 // requesting their own reset.
 const forgotPasswordLimiter = rateLimit({
+  name: "forgot-password",
   limit: 5,
   windowMs: 60 * 60 * 1000,
   keyGenerator: (req) => `${req.ip}:${String(req.body?.email ?? "").toLowerCase()}`,
@@ -55,6 +58,7 @@ const forgotPasswordLimiter = rateLimit({
 // it's that an unmetered endpoint doing a hash and a database lookup per
 // request is free work for anyone who wants to spend our CPU.
 const resetPasswordLimiter = rateLimit({
+  name: "reset-password",
   limit: 20,
   windowMs: 15 * 60 * 1000,
   message: "Too many password reset attempts. Please try again later.",
@@ -161,7 +165,7 @@ router.post(
 
     // A user who simply mistyped their password a few times shouldn't stay
     // throttled once they get it right.
-    loginLimiter.limiter.reset(loginLimiter.keyFor(req));
+    await loginLimiter.reset(req);
 
     res.json({
       accessToken,

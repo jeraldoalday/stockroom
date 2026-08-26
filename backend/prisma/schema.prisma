@@ -380,3 +380,22 @@ model SalesOrderLine {
   @@index([salesOrderId])
   @@map("sales_order_lines")
 }
+
+// Backs lib/rateLimit.ts's fixed-window limiter. One row per (limiter name,
+// caller key) — e.g. "login:203.0.113.4:owner@shop.test" — rather than one
+// table per limiter, since every limiter needs the same two columns and
+// nothing distinguishes them at the storage layer.
+//
+// Shared across every API instance by living in the same Postgres database
+// everything else does, instead of adding Redis as a second store this
+// project would have no other use for. `key` alone is the primary key
+// because the increment-or-reset logic is a single atomic
+// `INSERT ... ON CONFLICT DO UPDATE` (see hitRateLimit) — there is nothing
+// here a relation or an index beyond the primary key would help with.
+model RateLimitBucket {
+  key     String   @id
+  count   Int
+  resetAt DateTime
+
+  @@map("rate_limit_buckets")
+}

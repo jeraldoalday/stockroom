@@ -4,7 +4,7 @@ jest.mock("../lib/prisma");
 
 import { resetPrismaMock } from "./testUtils/prismaMock";
 import { createApp } from "../app";
-import { RateLimiter } from "../lib/rateLimit";
+import { hitRateLimit, resetRateLimit } from "../lib/rateLimit";
 
 const app = createApp();
 
@@ -116,64 +116,67 @@ describe("signup rate limiting", () => {
 });
 
 // The window logic is time-dependent, so it's exercised directly with an
-// injected clock rather than by making the suite wait 15 real minutes.
-describe("RateLimiter", () => {
-  it("allows exactly `limit` hits inside a window", () => {
-    const limiter = new RateLimiter({ limit: 3, windowMs: 1000 });
-    const now = 1_000_000;
+// injected clock rather than by making the suite wait 15 real minutes. This
+// also covers hitRateLimit() as the shared primitive every route-level
+// limiter above is built on, against the mocked upsert in
+// lib/__mocks__/prisma.ts (see its comment on why a mock can't exercise the
+// concurrent-request case a real Postgres UPSERT resolves).
+describe("hitRateLimit", () => {
+  it("allows exactly `limit` hits inside a window", async () => {
+    const now = new Date(1_000_000);
 
-    expect(limiter.hit("a", now).allowed).toBe(true);
-    expect(limiter.hit("a", now + 10).allowed).toBe(true);
-    expect(limiter.hit("a", now + 20).allowed).toBe(true);
-    expect(limiter.hit("a", now + 30).allowed).toBe(false);
+    expect((await hitRateLimit("a", 3, 1000, now)).allowed).toBe(true);
+    expect((await hitRateLimit("a", 3, 1000, new Date(now.getTime() + 10))).allowed).toBe(true);
+    expect((await hitRateLimit("a", 3, 1000, new Date(now.getTime() + 20))).allowed).toBe(true);
+    expect((await hitRateLimit("a", 3, 1000, new Date(now.getTime() + 30))).allowed).toBe(false);
   });
 
-  it("starts a fresh window once the old one expires", () => {
-    const limiter = new RateLimiter({ limit: 1, windowMs: 1000 });
-    const now = 1_000_000;
+  it("starts a fresh window once the old one expires", async () => {
+    const now = new Date(1_000_000);
 
-    expect(limiter.hit("a", now).allowed).toBe(true);
-    expect(limiter.hit("a", now + 500).allowed).toBe(false);
-    expect(limiter.hit("a", now + 1001).allowed).toBe(true);
+    expect((await hitRateLimit("a", 1, 1000, now)).allowed).toBe(true);
+    expect((await hitRateLimit("a", 1, 1000, new Date(now.getTime() + 500))).allowed).toBe(false);
+    expect((await hitRateLimit("a", 1, 1000, new Date(now.getTime() + 1001))).allowed).toBe(true);
   });
 
-  it("counts each key independently", () => {
-    const limiter = new RateLimiter({ limit: 1, windowMs: 1000 });
-    const now = 1_000_000;
+  it("counts each key independently", async () => {
+    const now = new Date(1_000_000);
 
-    expect(limiter.hit("a", now).allowed).toBe(true);
-    expect(limiter.hit("b", now).allowed).toBe(true);
-    expect(limiter.hit("a", now).allowed).toBe(false);
+    expect((await hitRateLimit("a", 1, 1000, now)).allowed).toBe(true);
+    expect((await hitRateLimit("b", 1, 1000, now)).allowed).toBe(true);
+    expect((await hitRateLimit("a", 1, 1000, now)).allowed).toBe(false);
   });
 
-  it("reports a retry-after that shrinks as the window drains", () => {
-    const limiter = new RateLimiter({ limit: 1, windowMs: 10_000 });
-    const now = 1_000_000;
+  it("reports a retry-after that shrinks as the window drains", async () => {
+    const now = new Date(1_000_000);
 
-    limiter.hit("a", now);
-    expect(limiter.hit("a", now + 1_000).retryAfterSeconds).toBe(9);
-    expect(limiter.hit("a", now + 9_500).retryAfterSeconds).toBe(1);
+    await hitRateLimit("a", 1, 10_000, now);
+    expect((await hitRateLimit("a", 1, 10_000, new Date(now.getTime() + 1_000))).retryAfterSeconds).toBe(9);
+    expect((await hitRateLimit("a", 1, 10_000, new Date(now.getTime() + 9_500))).retryAfterSeconds).toBe(1);
+  });
+});
+
+describe("resetRateLimit", () => {
+  it("clears a bucket outright, so the next hit starts a fresh window", async () => {
+    const now = new Date(1_000_000);
+
+    await hitRateLimit("a", 1, 10_000, now);
+    expect((await hitRateLimit("a", 1, 10_000, now)).allowed).toBe(false);
+
+    await resetRateLimit("a");
+
+    expect((await hitRateLimit("a", 1, 10_000, now)).allowed).toBe(true);
   });
 
-  it("prunes expired buckets so the map does not grow without bound", () => {
-    const limiter = new RateLimiter({ limit: 5, windowMs: 1000 });
-    const now = 1_000_000;
+  it("leaves other buckets untouched", async () => {
+    const now = new Date(1_000_000);
 
-    limiter.hit("a", now);
-    limiter.hit("b", now);
-    expect(limiter.size).toBe(2);
+    await hitRateLimit("a", 1, 10_000, now);
+    await hitRateLimit("b", 1, 10_000, now);
 
-    limiter.prune(now + 2000);
-    expect(limiter.size).toBe(0);
-  });
+    await resetRateLimit("a");
 
-  it("keeps live buckets when pruning", () => {
-    const limiter = new RateLimiter({ limit: 5, windowMs: 10_000 });
-    const now = 1_000_000;
-
-    limiter.hit("live", now);
-    limiter.prune(now + 1000);
-    expect(limiter.size).toBe(1);
+    expect((await hitRateLimit("b", 1, 10_000, now)).allowed).toBe(false);
   });
 });
 

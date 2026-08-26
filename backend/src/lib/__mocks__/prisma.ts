@@ -283,6 +283,7 @@ const tables = {
   salesOrderLine: new Table(),
   passwordResetToken: new Table({ usedAt: null }),
   refreshToken: new Table({ revokedAt: null, replacedById: null }),
+  rateLimitBucket: new Table(),
 };
 
 // `lib/dashboardStats.ts` pushes the low-stock predicate (a comparison
@@ -330,13 +331,42 @@ function mockLowStockPage(organizationId: string, pageSize: number, offset: numb
   return lowStock.slice(offset, offset + pageSize).map((row) => ({ ...row, totalCount: total }));
 }
 
+// lib/rateLimit.ts's atomic "increment, or reset if the window has rolled
+// over" upsert. There's no SQL engine here to run the real
+// `INSERT ... ON CONFLICT DO UPDATE` against, so it's re-derived directly
+// against the in-memory table — matched by marker comment, same trade as
+// the dashboard queries above. Single-threaded JS makes this trivially
+// atomic where the real query needs Postgres to serialize it; that's the
+// one behaviour a mock can't exercise; see rateLimit.test.ts for a
+// real-Postgres-only note on the concurrent case.
+function mockRateLimitHit(key: string, freshResetAt: Date, now: Date): Rec[] {
+  let row = tables.rateLimitBucket.rows.find((r) => r.key === key);
+  if (!row) {
+    row = { key, count: 1, resetAt: freshResetAt };
+    tables.rateLimitBucket.rows.push(row);
+  } else if (row.resetAt <= now) {
+    row.count = 1;
+    row.resetAt = freshResetAt;
+  } else {
+    row.count += 1;
+  }
+  return [{ count: row.count, resetAt: row.resetAt }];
+}
+
 // Dispatches a tagged-template $queryRaw call to its hand-written
-// equivalent above by marker comment. Both mocked queries interpolate
+// equivalent above by marker comment. The dashboard queries interpolate
 // organizationId as their first value (possibly more than once, always the
 // same value), so `values[0]` is always safe to read as it regardless of
-// how many times it repeats later in the array.
+// how many times it repeats later in the array; rateLimit.hit follows the
+// same convention for its own first two distinct values.
 function $queryRaw(strings: TemplateStringsArray, ...values: unknown[]): Promise<Rec[]> {
   const sql = strings.join("");
+
+  if (sql.includes("rateLimit.hit")) {
+    const [key, freshResetAt, now] = values as [string, Date, Date];
+    return Promise.resolve(mockRateLimitHit(key, freshResetAt, now));
+  }
+
   const organizationId = values[0] as string;
 
   if (sql.includes("dashboardStats.stockSummary")) {

@@ -25,3 +25,8 @@ export async function updateTeamMemberRole(id: string, role: UserRole): Promise<
 export async function removeTeamMember(id: string): Promise<void> {
   await apiClient.delete(`/users/${id}`);
 }
+
+export async function unlockTeamMemberLogin(id: string): Promise<{ wasLockedOut: boolean }> {
+  const res = await apiClient.post<{ wasLockedOut: boolean }>(`/users/${id}/unlock-login`);
+  return res.data;
+}

@@ -96,6 +96,30 @@ export async function resetRateLimit(bucketKey: string): Promise<void> {
   await prisma.rateLimitBucket.deleteMany({ where: { key: bucketKey } });
 }
 
+/**
+ * Clears every login bucket for one email address, regardless of which IP
+ * it was tripped from — an Owner unblocking a colleague has no way to know
+ * which address they were locked out at, and the login key is `login:<ip>:
+ * <email>`, so an exact `resetRateLimit` key wouldn't find it.
+ *
+ * Matched by exact prefix/suffix (`left`/`right`, not `LIKE`) so an email
+ * containing `%` or `_` — both valid, if unusual, local-part characters —
+ * can't be misread as a wildcard and clear buckets it shouldn't.
+ *
+ * Returns how many buckets were cleared, so the caller can tell "there was
+ * nothing to unlock" from "this actually did something."
+ */
+export async function resetLoginLockout(email: string): Promise<number> {
+  const suffix = `:${email.toLowerCase()}`;
+  const rows = await prisma.$queryRaw<{ key: string }[]>`
+    -- rateLimit.resetLoginLockout
+    DELETE FROM "rate_limit_buckets"
+    WHERE left("key", 6) = 'login:' AND right("key", ${suffix.length}::int) = ${suffix}
+    RETURNING "key"
+  `;
+  return rows.length;
+}
+
 export function rateLimit(options: RateLimitOptions) {
   const keyFor = (req: Request) => `${options.name}:${(options.keyGenerator ?? defaultKey)(req)}`;
 

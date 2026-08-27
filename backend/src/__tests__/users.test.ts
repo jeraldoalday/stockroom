@@ -157,6 +157,88 @@ describe("Users (team management) API", () => {
     expect(deleteStaff.status).toBe(204);
   });
 
+  // Complements rateLimit.test.ts's coverage of the throttle itself: this is
+  // the escape hatch an Owner needs once a colleague trips it for real.
+  describe("unlocking a locked-out login", () => {
+    async function lockOut(email: string) {
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        await request(app).post("/api/auth/login").send({ email, password: "wrong" });
+      }
+    }
+
+    it("clears the lockout so the member can sign in again immediately", async () => {
+      const owner = await signUpAndGetToken("owner7@shop.test", "Shop 7");
+      const staff = await inviteStaff(owner.accessToken, "clerk7@shop.test");
+
+      await lockOut("clerk7@shop.test");
+      const stillBlocked = await request(app)
+        .post("/api/auth/login")
+        .send({ email: "clerk7@shop.test", password: "hunter22222" });
+      expect(stillBlocked.status).toBe(429);
+
+      const unlock = await request(app)
+        .post(`/api/users/${staff.id}/unlock-login`)
+        .set("Authorization", `Bearer ${owner.accessToken}`);
+      expect(unlock.status).toBe(200);
+      expect(unlock.body).toEqual({ wasLockedOut: true });
+
+      const afterUnlock = await request(app)
+        .post("/api/auth/login")
+        .send({ email: "clerk7@shop.test", password: "hunter22222" });
+      expect(afterUnlock.status).toBe(200);
+    });
+
+    it("reports wasLockedOut: false for a member who wasn't throttled", async () => {
+      const owner = await signUpAndGetToken("owner8@shop.test", "Shop 8");
+      const staff = await inviteStaff(owner.accessToken, "clerk8@shop.test");
+
+      const unlock = await request(app)
+        .post(`/api/users/${staff.id}/unlock-login`)
+        .set("Authorization", `Bearer ${owner.accessToken}`);
+      expect(unlock.status).toBe(200);
+      expect(unlock.body).toEqual({ wasLockedOut: false });
+    });
+
+    it("does not clear a different member's lockout", async () => {
+      const owner = await signUpAndGetToken("owner9@shop.test", "Shop 9");
+      const staffA = await inviteStaff(owner.accessToken, "clerk9a@shop.test");
+      await inviteStaff(owner.accessToken, "clerk9b@shop.test");
+
+      await lockOut("clerk9b@shop.test");
+
+      // Unlocking staffA does nothing for staffB's still-live lockout.
+      await request(app)
+        .post(`/api/users/${staffA.id}/unlock-login`)
+        .set("Authorization", `Bearer ${owner.accessToken}`);
+
+      const stillBlocked = await request(app)
+        .post("/api/auth/login")
+        .send({ email: "clerk9b@shop.test", password: "hunter22222" });
+      expect(stillBlocked.status).toBe(429);
+    });
+
+    it("404s for a user outside the caller's organization", async () => {
+      const ownerA = await signUpAndGetToken("owner10a@shop.test", "Shop 10a");
+      const ownerB = await signUpAndGetToken("owner10b@shop.test", "Shop 10b");
+
+      const res = await request(app)
+        .post(`/api/users/${ownerB.user.id}/unlock-login`)
+        .set("Authorization", `Bearer ${ownerA.accessToken}`);
+      expect(res.status).toBe(404);
+    });
+
+    it("blocks a STAFF user from unlocking anyone", async () => {
+      const owner = await signUpAndGetToken("owner11@shop.test", "Shop 11");
+      const staff = await inviteStaff(owner.accessToken, "clerk11@shop.test");
+      const staffToken = await loginToken("clerk11@shop.test");
+
+      const res = await request(app)
+        .post(`/api/users/${staff.id}/unlock-login`)
+        .set("Authorization", `Bearer ${staffToken}`);
+      expect(res.status).toBe(403);
+    });
+  });
+
   it("blocks removing a user who has posted stock movements", async () => {
     const owner = await signUpAndGetToken("owner6@shop.test", "Shop 6");
     const staff = await inviteStaff(owner.accessToken, "clerk6@shop.test");

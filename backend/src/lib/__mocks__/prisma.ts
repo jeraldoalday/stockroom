@@ -353,6 +353,17 @@ function mockRateLimitHit(key: string, freshResetAt: Date, now: Date): Rec[] {
   return [{ count: row.count, resetAt: row.resetAt }];
 }
 
+// lib/rateLimit.ts's "clear every login bucket for this email, whichever IP
+// tripped it" delete. Re-derived the same way mockRateLimitHit is: JS's own
+// startsWith/endsWith stand in for the real query's left()/right() string
+// comparison, since there's no SQL engine here to run it against.
+function mockResetLoginLockout(suffix: string): Rec[] {
+  const table = tables.rateLimitBucket;
+  const removed = table.rows.filter((r) => typeof r.key === "string" && r.key.startsWith("login:") && r.key.endsWith(suffix));
+  table.rows = table.rows.filter((r) => !removed.includes(r));
+  return removed.map((r) => ({ key: r.key }));
+}
+
 // Dispatches a tagged-template $queryRaw call to its hand-written
 // equivalent above by marker comment. The dashboard queries interpolate
 // organizationId as their first value (possibly more than once, always the
@@ -365,6 +376,11 @@ function $queryRaw(strings: TemplateStringsArray, ...values: unknown[]): Promise
   if (sql.includes("rateLimit.hit")) {
     const [key, freshResetAt, now] = values as [string, Date, Date];
     return Promise.resolve(mockRateLimitHit(key, freshResetAt, now));
+  }
+  if (sql.includes("rateLimit.resetLoginLockout")) {
+    // values are [suffix.length, suffix] in that order — see rateLimit.ts.
+    const suffix = values[1] as string;
+    return Promise.resolve(mockResetLoginLockout(suffix));
   }
 
   const organizationId = values[0] as string;

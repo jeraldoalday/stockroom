@@ -7,6 +7,7 @@ import { ApiError } from "../lib/errors";
 import { env } from "../lib/env";
 import { emailSender } from "../lib/email";
 import { generateOpaqueToken, hashOpaqueToken, hashPassword } from "../lib/auth";
+import { resetLoginLockout } from "../lib/rateLimit";
 
 const router = Router();
 router.use(requireAuth);
@@ -156,6 +157,34 @@ router.delete(
 
     await prisma.user.delete({ where: { id: user.id } });
     res.status(204).send();
+  })
+);
+
+// Login attempts are throttled per (IP, email) so a credential-stuffing run
+// can't just move to a fresh account (see lib/rateLimit.ts) — but that
+// leaves an Owner with no way to help a colleague who genuinely mistyped
+// their password ten times: the window has to be waited out, up to 15
+// minutes, with no self-service reset available (the throttle exists
+// precisely so the correct password doesn't lift it early). This clears
+// every login bucket for the member's email regardless of which IP tripped
+// it, since the Owner doing the unlocking has no way to know that.
+//
+// Deliberately its own endpoint rather than folded into PATCH — clearing a
+// lockout isn't a change to the user record, and mixing it into the role
+// update would make "no-op PATCH with nothing changed" an unclear signal
+// for whether a lockout was meant to be cleared.
+router.post(
+  "/:id/unlock-login",
+  asyncHandler(async (req, res) => {
+    const organizationId = req.auth!.organizationId;
+
+    const user = await prisma.user.findFirst({ where: { id: req.params.id, organizationId } });
+    if (!user) {
+      throw ApiError.notFound("User not found");
+    }
+
+    const clearedCount = await resetLoginLockout(user.email);
+    res.json({ wasLockedOut: clearedCount > 0 });
   })
 );
 

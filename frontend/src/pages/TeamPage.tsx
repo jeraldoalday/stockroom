@@ -3,7 +3,13 @@ import type { FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
 import { useAuth } from "../context/AuthContext";
-import { fetchTeamMembers, inviteTeamMember, removeTeamMember, updateTeamMemberRole } from "../api/users";
+import {
+  fetchTeamMembers,
+  inviteTeamMember,
+  removeTeamMember,
+  unlockTeamMemberLogin,
+  updateTeamMemberRole,
+} from "../api/users";
 import { isApiError } from "../api/errors";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useConfirmation } from "../components/useConfirmation";
@@ -16,6 +22,7 @@ export function TeamPage() {
   const [showForm, setShowForm] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
+  const [rowNotice, setRowNotice] = useState<string | null>(null);
 
   const membersQuery = useQuery({ queryKey: ["team"], queryFn: fetchTeamMembers });
 
@@ -35,6 +42,22 @@ export function TeamPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["team"] }),
     onError: (err) => {
       setRowError(isApiError(err) ? err.response?.data?.error ?? "Could not change role" : "Could not change role");
+    },
+  });
+
+  const unlockMutation = useMutation({
+    mutationFn: unlockTeamMemberLogin,
+    onSuccess: (result, id) => {
+      const member = membersQuery.data?.items.find((m) => m.id === id);
+      const who = member?.name ?? "This member";
+      setRowNotice(
+        result.wasLockedOut
+          ? `${who}'s login lockout was cleared — they can try signing in again right away.`
+          : `${who} wasn't locked out.`
+      );
+    },
+    onError: (err) => {
+      setRowError(isApiError(err) ? err.response?.data?.error ?? "Could not clear the lockout" : "Could not clear the lockout");
     },
   });
 
@@ -106,6 +129,7 @@ export function TeamPage() {
       )}
 
       {rowError && <div className="mb-4 text-sm text-red-600">{rowError}</div>}
+      {rowNotice && <div className="mb-4 text-sm text-green-700">{rowNotice}</div>}
 
       <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
         <table className="min-w-full divide-y divide-gray-200 text-sm">
@@ -151,8 +175,23 @@ export function TeamPage() {
                     {!isSelf && (
                       <button
                         type="button"
+                        disabled={unlockMutation.isPending && unlockMutation.variables === member.id}
                         onClick={() => {
                           setRowError(null);
+                          setRowNotice(null);
+                          unlockMutation.mutate(member.id);
+                        }}
+                        className="text-xs text-brand-600 hover:underline disabled:opacity-50"
+                      >
+                        Unlock login
+                      </button>
+                    )}
+                    {!isSelf && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRowError(null);
+                          setRowNotice(null);
                           pendingRemove.request(member);
                         }}
                         className="text-xs text-red-600 hover:underline"

@@ -1680,3 +1680,90 @@ pytest -q` (44/44, unaffected — no changes there this session); frontend
   a second timer — both follow precedent already set elsewhere in this
   codebase (SMTP over a vendor SDK, the dashboard's existing raw-SQL
   pattern) rather than introducing a new kind of choice.
+
+## Day 22 (post-MVP) — 2026-08-27
+
+**Planned:** the second item on the Day 21 "Next" list — a way for an Owner
+to end a specific rate-limited lockout early. Today a login lockout only
+clears on a successful sign-in or by waiting out the 15-minute window, and
+an Owner has no lever at all if a Staff member locks themselves out and
+can't remember the right password to begin with.
+
+**Shipped — Owner can clear a colleague's login lockout:**
+
+- `POST /api/users/:id/unlock-login` (Owner-only, same router guard as the
+  rest of team management). Looks the target user up by id scoped to the
+  caller's organization (a cross-org id 404s, same pattern as every other
+  route here), then clears every login-rate-limit bucket for that user's
+  email address and reports `{ wasLockedOut: boolean }` so the UI can tell
+  "this actually did something" from "there was nothing to clear."
+- The tricky part is that the login limiter's bucket key is `login:<ip>:
+  <email>` (see Day 21) — an Owner unblocking a colleague has no way to know
+  which IP they were locked out from, so an exact-key reset (the primitive
+  `resetRateLimit` already used after a successful login) can't find it.
+  `resetLoginLockout(email)` in `lib/rateLimit.ts` instead deletes by
+  matching the key's `login:` prefix and `:<email>` suffix with SQL's
+  `left()`/`right()`, not `LIKE` — an email containing `%` or `_` (both
+  valid, if unusual, local-part characters) would otherwise be misread as a
+  wildcard and could clear buckets it has no business touching.
+- Scoped to the `login` limiter specifically, not every bucket that happens
+  to key on this email — forgot-password and reset-password buckets are
+  left alone, since clearing those wasn't the ask and an Owner shouldn't be
+  able to silently lift a stranger-facing throttle as a side effect of
+  helping a colleague sign in.
+- Frontend: `TeamPage` gets an "Unlock login" action next to each non-self
+  member row, with an inline notice ("lockout was cleared" / "wasn't locked
+  out") rather than a silent no-op, so an Owner clicking it on a member who
+  turned out not to be locked out gets a clear answer instead of wondering
+  whether it worked.
+- 5 new backend tests: the happy path (lock a Staff member out via 10 failed
+  logins, unlock, confirm the very next attempt is a plain 401 instead of a
+  429), the no-op case, that unlocking one member doesn't touch a different
+  member's live lockout, the cross-org 404, and the STAFF-is-403'd case.
+
+**Found and fixed a real bug while verifying against real Postgres, not the
+mocked suite:** the first cut of `resetLoginLockout` passed
+`${suffix.length}` — a plain JS number — into `right("key", ...)`.
+Postgres has no `right(text, bigint)` overload, only `right(text, int)`, and
+Prisma/node-postgres binds a bare JS number parameter as `bigint` by
+default; the mocked test suite (plain JS `.endsWith()`, no SQL types to get
+wrong) couldn't have caught this — it went green on the very query that
+500'd against a real database. Cast the parameter explicitly
+(`${suffix.length}::int`) and confirmed the fix by round-tripping through
+`psql`: 10 failed logins produced a `count = 11` row keyed
+`login:127.0.0.1:<email>`, the unlock endpoint deleted it (`0 rows`
+afterward), and the next login attempt came back `401` instead of `429`.
+Also drove the same flow through a real Playwright browser session against
+the running frontend/backend/Postgres: signed up an Owner, invited a Staff
+member, locked their login out via the API, clicked "Unlock login" on the
+Team page, and confirmed both the UI's success notice and that the very
+next login attempt no longer 429s.
+
+**Verified (all three services):** backend `npx tsc --noEmit`, `npm run
+lint`, full Jest suite (320/320, up from 315); python-service `python3 -m
+pytest -q` (44/44, unaffected — no changes there this session); frontend
+`npm run lint` and `npm run build`. All clean. Beyond that: real local
+Postgres (`pg_ctlcluster 16 main start`, created the `stockroom` role/db
+from scratch — this sandbox had none of it yet, no new migration was needed
+since this session added a query, not a schema change), a real backend +
+frontend + Postgres stack, and the real-database bug above caught and fixed
+before it ever reached a commit.
+
+**Next:**
+
+1. From the Day 21 list, still open: revocable access tokens (bearer-only,
+   15-minute exposure window after any revocation) and moving the token/
+   rate-limit prune sweep off the in-process timer onto the documented cron
+   path for a real multi-instance deploy.
+2. Worth a look next time a session has Postgres available: audit the other
+   `$queryRaw` call sites (`dashboardStats.ts`, `rateLimit.ts`'s `hitRateLimit`)
+   for the same bare-JS-number-into-a-typed-SQL-function trap this session's
+   bug came from. None of them pass a raw number into a function with a
+   narrower-than-`bigint` overload today (they compare against `Date`/string
+   values, which don't have this ambiguity), but it's the kind of mistake
+   that stays invisible until it's run against a real database, which not
+   every session has.
+
+**Blockers/decisions carried forward:**
+
+- None new this session.

@@ -58,9 +58,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // `isAuthenticated`, and ProtectedRoute redirects to /login on its own —
   // no imperative navigation from inside an interceptor.
   useEffect(() => {
+    // Only the user half: `endStoredSession` has already cleared the
+    // tokens by the time it calls this.
     setSessionExpiredHandler(() => {
-      setStoredToken(null);
-      setStoredRefreshToken(null);
       localStorage.removeItem(USER_STORAGE_KEY);
       setUser(null);
     });

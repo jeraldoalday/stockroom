@@ -55,6 +55,21 @@ export function setSessionExpiredHandler(handler: (() => void) | null) {
   onSessionExpired = handler;
 }
 
+/**
+ * Tears down a session that can no longer be recovered.
+ *
+ * Clearing the tokens and telling the app about it belong together — a
+ * caller that did one without the other would leave either a signed-in UI
+ * with no credentials or credentials with no UI. Both halves used to live
+ * inline in the interceptor's catch block, with `AuthContext`'s handler
+ * repeating the token half a second time.
+ */
+export function endStoredSession(): void {
+  setStoredToken(null);
+  setStoredRefreshToken(null);
+  onSessionExpired?.();
+}
+
 // A page typically has several queries in flight at once, so an expired
 // token produces a burst of simultaneous 401s. They share one refresh
 // request: the first 401 starts it and the rest await the same promise,
@@ -135,9 +150,7 @@ apiClient.interceptors.response.use(
     } catch {
       // The refresh token is expired or the user was deleted; nothing to
       // recover, so end the session rather than leaving a half-dead one.
-      setStoredToken(null);
-      setStoredRefreshToken(null);
-      onSessionExpired?.();
+      endStoredSession();
       return Promise.reject(error);
     } finally {
       refreshInFlight = null;

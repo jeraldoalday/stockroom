@@ -38,7 +38,7 @@ export class MockApi {
   readonly requests: InternalAxiosRequestConfig[] = [];
 
   private readonly routes = new Map<RouteKey, MockResponseSpec[]>();
-  private readonly originalAdapter: AxiosAdapter | AxiosAdapter[] | string | string[] | undefined;
+  private readonly originalAdapter: typeof apiClient.defaults.adapter;
 
   constructor() {
     this.originalAdapter = apiClient.defaults.adapter;

@@ -6,6 +6,7 @@ import { archiveCustomer, createCustomer, fetchCustomers, restoreCustomer } from
 import { isApiError } from "../api/errors";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useConfirmation } from "../components/useConfirmation";
+import { useDebouncedValue } from "../components/useDebouncedValue";
 import { Pagination } from "../components/Pagination";
 import type { Customer } from "../api/types";
 import type { CustomerStatusFilter } from "../api/customers";
@@ -21,6 +22,9 @@ const STATUS_TABS: { value: CustomerStatusFilter; label: string }[] = [
 export function CustomersPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
+  // Controlled by `search` for instant typing, keyed on the settled value
+  // so a typed word costs one request rather than one per keystroke.
+  const debouncedSearch = useDebouncedValue(search);
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState<CustomerStatusFilter>("active");
   const [showForm, setShowForm] = useState(false);
@@ -28,8 +32,8 @@ export function CustomersPage() {
   const [rowError, setRowError] = useState<string | null>(null);
 
   const customersQuery = useQuery({
-    queryKey: ["customers", search, status, page],
-    queryFn: () => fetchCustomers({ page, pageSize: PAGE_SIZE, status, ...(search ? { search } : {}) }),
+    queryKey: ["customers", debouncedSearch, status, page],
+    queryFn: () => fetchCustomers({ page, pageSize: PAGE_SIZE, status, ...(debouncedSearch ? { search: debouncedSearch } : {}) }),
     placeholderData: (previous) => previous,
   });
 

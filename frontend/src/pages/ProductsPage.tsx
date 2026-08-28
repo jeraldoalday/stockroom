@@ -17,6 +17,7 @@ import type { Product } from "../api/types";
 import { isApiError } from "../api/errors";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useConfirmation } from "../components/useConfirmation";
+import { useDebouncedValue } from "../components/useDebouncedValue";
 
 const STATUS_TABS: { value: ProductStatusFilter; label: string }[] = [
   { value: "active", label: "Active" },
@@ -37,6 +38,9 @@ export function ProductsPage() {
   const { user } = useAuth();
   const isOwner = user?.role === "OWNER";
   const [search, setSearch] = useState("");
+  // The box stays controlled by `search` so typing is instant; the query is
+  // keyed on the settled value so a word is one request, not one per key.
+  const debouncedSearch = useDebouncedValue(search);
   // null = form closed; a Product = editing it; "new" = the create form.
   const [formTarget, setFormTarget] = useState<Product | "new" | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -52,8 +56,11 @@ export function ProductsPage() {
   const editing = formTarget !== null && formTarget !== "new" ? formTarget : null;
 
   const productsQuery = useQuery({
-    queryKey: ["products", search, status],
-    queryFn: () => fetchProducts({ search: search || undefined, status }),
+    queryKey: ["products", debouncedSearch, status],
+    queryFn: () => fetchProducts({ search: debouncedSearch || undefined, status }),
+    // Keeps the current results on screen while the next search runs,
+    // instead of blanking the table between keystrokes.
+    placeholderData: (previous) => previous,
   });
 
   const pendingArchive = useConfirmation<Product>();

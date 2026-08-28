@@ -6,6 +6,7 @@ import { archiveSupplier, createSupplier, fetchSuppliers, restoreSupplier } from
 import { isApiError } from "../api/errors";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useConfirmation } from "../components/useConfirmation";
+import { useDebouncedValue } from "../components/useDebouncedValue";
 import { Pagination } from "../components/Pagination";
 import type { Supplier } from "../api/types";
 import type { SupplierStatusFilter } from "../api/suppliers";
@@ -21,6 +22,9 @@ const STATUS_TABS: { value: SupplierStatusFilter; label: string }[] = [
 export function SuppliersPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
+  // Controlled by `search` for instant typing, keyed on the settled value
+  // so a typed word costs one request rather than one per keystroke.
+  const debouncedSearch = useDebouncedValue(search);
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState<SupplierStatusFilter>("active");
   const [showForm, setShowForm] = useState(false);
@@ -28,8 +32,8 @@ export function SuppliersPage() {
   const [rowError, setRowError] = useState<string | null>(null);
 
   const suppliersQuery = useQuery({
-    queryKey: ["suppliers", search, status, page],
-    queryFn: () => fetchSuppliers({ page, pageSize: PAGE_SIZE, status, ...(search ? { search } : {}) }),
+    queryKey: ["suppliers", debouncedSearch, status, page],
+    queryFn: () => fetchSuppliers({ page, pageSize: PAGE_SIZE, status, ...(debouncedSearch ? { search: debouncedSearch } : {}) }),
     placeholderData: (previous) => previous,
   });
 

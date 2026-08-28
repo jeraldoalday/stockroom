@@ -12,7 +12,7 @@ tracking, purchase & sales orders, low-stock alerts, and reporting.
 ## Stack
 
 - **backend/** — Node.js + TypeScript + Express + Prisma + PostgreSQL (core API, auth, tenant boundary)
-- **frontend/** — React + TypeScript + Vite + TanStack Query + Tailwind
+- **frontend/** — React + TypeScript + Vite + TanStack Query + Tailwind (tested with Vitest + Testing Library)
 - **python-service/** — FastAPI + Pandas (CSV import/export, reports, demand forecasting — read-only against the same database)
 
 ## Local development
@@ -78,8 +78,17 @@ pytest
 
 cd ../frontend
 npm run lint
-npm run build          # type-checks as part of the build
+npm test               # Vitest + Testing Library, jsdom
+npm run build          # type-checks the tests too, since they live under src/
 ```
+
+The frontend suite talks to a mock axios *adapter* rather than a mocked
+`axios` module, so a request still runs through the real request
+interceptor that attaches the bearer token and a real 401 still runs
+through the real response interceptor that refreshes and retries. Mocking
+the module out would stub the code most worth testing. `src/test/render.tsx`
+wraps a component in the three providers `main.tsx` uses — Query, Router,
+Auth — because the pages reach for all three and a bare `render()` throws.
 
 `python-service` runs on Python 3.9+ (CI pins 3.11). Keep its route
 signatures on `Optional[X]` rather than `X | None`: FastAPI resolves

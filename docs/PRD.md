@@ -220,6 +220,22 @@ blocking for a design-partner pilot:
   automatically in local dev (`db/init/01-create-readonly-role.sql`); a
   production deploy still has to create it, using
   `backend/prisma/sql/readonly_role.sql` per `docs/DEPLOYMENT.md`.
+- ~~**The frontend has no automated tests.**~~ **Resolved (Day 23):** an
+  omission this list should have carried from the start — 5,698 lines of
+  React with nothing behind them but `eslint` and `tsc`, both of which
+  check that the code is well-formed and neither of which has an opinion
+  about whether it does the right thing. Vitest + Testing Library now cover
+  the token-refresh interceptor, the auth context and route guards, the
+  confirmation dialog, and a full list page end to end (149 tests), and CI
+  runs them.
+- ~~**Forms are unlabelled.**~~ **Resolved (Day 23):** the app had 52
+  `<label>` tags and one `htmlFor` between them, so 51 inputs across 14
+  pages had no accessible name and clicking a label focused nothing. Every
+  pair is now joined by a `useId()`-derived id. The confirmation dialog
+  also gained a focus trap: `aria-modal` had been doing nothing about the
+  Tab key, so two Tabs put a keyboard user on the row button behind an open
+  modal. A broader accessibility pass — colour contrast, `aria-live` for
+  the inline error banners, table semantics — has not been done.
 - Per-location reorder points and per-location STAFF scoping: both
   explicitly deferred (§12).
 

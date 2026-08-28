@@ -74,6 +74,29 @@ describe("CustomersPage list", () => {
     expect(await screen.findByText("No customers yet.")).toBeInTheDocument();
   });
 
+  it("blames the search, not the account, when a search matches nothing", async () => {
+    // "No customers yet." after a search reads as "your customers are
+    // gone", which is the opposite of what happened.
+    api.on("GET", "/customers", page([acme]), page([]));
+    const { user } = renderPage();
+    await screen.findByText("Acme Cafe");
+
+    await user.type(screen.getByPlaceholderText("Search by name..."), "Nobody");
+
+    expect(await screen.findByText("No customers match “Nobody”.")).toBeInTheDocument();
+    expect(screen.queryByText("No customers yet.")).not.toBeInTheDocument();
+  });
+
+  it("says the archived tab is empty rather than the account", async () => {
+    api.on("GET", "/customers", page([acme]), page([]));
+    const { user } = renderPage();
+    await screen.findByText("Acme Cafe");
+
+    await user.click(screen.getByRole("button", { name: "Archived" }));
+
+    expect(await screen.findByText("No archived customers.")).toBeInTheDocument();
+  });
+
   it("reports a failed load instead of an empty list", async () => {
     // These two states look identical in a table body, and confusing them
     // is how a user concludes their data is gone.

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
 import { archiveSupplier, createSupplier, fetchSuppliers, restoreSupplier } from "../api/suppliers";
 import { isApiError } from "../api/errors";
+import { emptyListMessage } from "../components/emptyListMessage";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useConfirmation } from "../components/useConfirmation";
 import { useDebouncedValue } from "../components/useDebouncedValue";
@@ -174,7 +175,7 @@ export function SuppliersPage() {
             )}
             {suppliersQuery.data?.items.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-gray-500">No suppliers yet.</td>
+                <td colSpan={4} className="px-4 py-6 text-center text-gray-500">{emptyListMessage({ noun: "suppliers", status, search: debouncedSearch })}</td>
               </tr>
             )}
             {suppliersQuery.data?.items.map((supplier) => (

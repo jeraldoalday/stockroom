@@ -11,6 +11,7 @@ import {
 } from "../api/locations";
 import type { LocationStatusFilter } from "../api/locations";
 import { isApiError } from "../api/errors";
+import { emptyListMessage } from "../components/emptyListMessage";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useConfirmation } from "../components/useConfirmation";
 import type { Location } from "../api/types";
@@ -164,7 +165,7 @@ export function LocationsPage() {
             {locationsQuery.data?.length === 0 && (
               <tr>
                 <td colSpan={4} className="px-4 py-6 text-center text-gray-500">
-                  {status === "archived" ? "No archived locations." : "No locations yet."}
+                  {emptyListMessage({ noun: "locations", status })}
                 </td>
               </tr>
             )}

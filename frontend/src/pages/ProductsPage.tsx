@@ -15,6 +15,7 @@ import type { ImportProductsResult, ProductStatusFilter } from "../api/products"
 import { createCategory, fetchCategories } from "../api/categories";
 import type { Product } from "../api/types";
 import { isApiError } from "../api/errors";
+import { emptyListMessage } from "../components/emptyListMessage";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useConfirmation } from "../components/useConfirmation";
 import { useDebouncedValue } from "../components/useDebouncedValue";
@@ -406,7 +407,7 @@ export function ProductsPage() {
             )}
             {productsQuery.data?.items.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-gray-500">No products yet.</td>
+                <td colSpan={6} className="px-4 py-6 text-center text-gray-500">{emptyListMessage({ noun: "products", status, search: debouncedSearch })}</td>
               </tr>
             )}
             {productsQuery.data?.items.map((product) => (

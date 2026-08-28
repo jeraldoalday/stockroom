@@ -11,6 +11,7 @@ import {
 } from "../api/categories";
 import type { CategoryStatusFilter } from "../api/categories";
 import { isApiError } from "../api/errors";
+import { emptyListMessage } from "../components/emptyListMessage";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useConfirmation } from "../components/useConfirmation";
 import type { Category } from "../api/types";
@@ -168,7 +169,7 @@ export function CategoriesPage() {
             {categoriesQuery.data?.length === 0 && (
               <tr>
                 <td colSpan={2} className="px-4 py-6 text-center text-gray-500">
-                  {status === "archived" ? "No archived categories." : "No categories yet."}
+                  {emptyListMessage({ noun: "categories", status })}
                 </td>
               </tr>
             )}

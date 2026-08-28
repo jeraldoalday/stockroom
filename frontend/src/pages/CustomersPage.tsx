@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
 import { archiveCustomer, createCustomer, fetchCustomers, restoreCustomer } from "../api/customers";
 import { isApiError } from "../api/errors";
+import { emptyListMessage } from "../components/emptyListMessage";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useConfirmation } from "../components/useConfirmation";
 import { useDebouncedValue } from "../components/useDebouncedValue";
@@ -174,7 +175,7 @@ export function CustomersPage() {
             )}
             {customersQuery.data?.items.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-gray-500">No customers yet.</td>
+                <td colSpan={4} className="px-4 py-6 text-center text-gray-500">{emptyListMessage({ noun: "customers", status, search: debouncedSearch })}</td>
               </tr>
             )}
             {customersQuery.data?.items.map((customer) => (

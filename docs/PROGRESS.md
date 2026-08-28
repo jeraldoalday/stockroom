@@ -1953,3 +1953,103 @@ what a screen reader talks to.
   future session is asked this again, the answer is that there is nothing
   to migrate — and the useful reading of the question is "make the React
   better", which is what this day did.
+
+## Day 24 (post-MVP) — 2026-08-28
+
+**Planned:** the top of the Day 23 "Next" list — page-level test suites,
+now that Day 23 built the harness and CustomersPage's suite to stand in for
+it. Picked DashboardPage first, named explicitly as "the most logic and
+the least coverage of anything on the frontend," then SuppliersPage and
+LocationsPage, two of the "five list pages" CustomersPage's suite was
+written to template.
+
+**Found the working tree was in a detached-HEAD state pointing at the
+Day 23 commit,** with the local `main` branch ref stale at Day 17. Not
+data loss — `origin/main` and `HEAD` were identical — just a leftover from
+how the session container was set up. Reset the local `main` branch onto
+`origin/main` before starting so this and future sessions have a normal
+branch to work from.
+
+**Shipped — three page-level test suites (58 tests):**
+
+- **DashboardPage** (14 tests): the Owner-only stock-value card actually
+  hides on `user.role`, not on whether the field happens to be present in
+  the response, so it stays hidden even if a future response ever includes
+  it by mistake; each of the three independent queries (summary, low-stock,
+  top-movers) fails, loads, and empties on its own — a failed top-movers
+  fetch doesn't blank the low-stock panel next to it; movement type labels
+  and signed quantities; a movement whose product wasn't included falls
+  back to a dash instead of throwing; an archived product that still sold
+  in the window is flagged rather than silently included.
+- **SuppliersPage** (22 tests): near line-for-line the same suite as
+  CustomersPage's, because the component is near line-for-line the same
+  page (noted as "near-identical" as far back as Day 7) — same tab/search/
+  archive/restore/pagination coverage, supplier nouns.
+- **LocationsPage** (22 tests): follows the same template but earns its
+  own suite rather than a copy, because two things about it are genuinely
+  different — `GET /locations` returns a bare array, not the `{items,
+  total, page, pageSize}` envelope every other list endpoint uses, so
+  there's no pagination control to test; and it has a "make default"
+  action nothing else has, including the rule that an archived location is
+  offered neither the button nor the "Default" badge, since an archived
+  location can't take stock and shouldn't be promotable to the one every
+  form defaults to.
+- One bug in the tests themselves, not the app: the first cut of the two
+  top-movers tests used `findByText("Widget")`, which matched both the
+  top-movers row and the identically-named product in the recent-activity
+  panel next to it. Caught immediately by Testing Library's own "multiple
+  elements" error (it lists every match), fixed by anchoring on the SKU
+  tag, which only the top-movers panel renders.
+
+**Verified (all three services):** frontend `npm run lint`, `npm test`
+(207/207, up from 149 — the 58 new tests plus all of Day 23's), and
+`npm run build` (which type-checks the tests too); backend `npx tsc
+--noEmit`, `npm run lint`, full Jest suite (320/320, unchanged — no backend
+file touched this session); python-service `python3 -m pytest -q` (44/44,
+likewise unchanged). All clean.
+
+Not run against a real Postgres or a real browser this session — no
+production code changed, only new test files exercised through Vitest's
+jsdom environment, so there is nothing here in the class of bug a real
+database or a real renderer would catch that the test run itself wouldn't
+already show. Real-Postgres/real-browser verification stays worth doing
+opportunistically for anything landed on a session that lacked either, per
+Day 19's note — nothing on record needs it right now beyond what's already
+flagged below.
+
+**Also did — the Day 22 "audit the other `$queryRaw` call sites" pickup:**
+read every `$queryRaw` call in `dashboardStats.ts` and `rateLimit.ts` for
+the same bare-JS-number-into-a-typed-SQL-function trap Day 22's
+`resetLoginLockout` bug came from (a plain JS number bound as `bigint`
+where Postgres only has a narrower-typed overload, e.g. `right(text,
+int)`). Found no other instance: `resetLoginLockout`'s own
+`${suffix.length}::int` already carries the explicit cast Day 22 added,
+`hitRateLimit`'s parameters are a string key and two `Date`s with no
+competing overload to be ambiguous about, and `dashboardStats.ts`'s
+`LIMIT`/`OFFSET` parameters aren't function arguments at all, so there's no
+overload-resolution step for a bare number to go wrong in. No code change
+needed; recording the audit here so the item can come off the list rather
+than get silently re-checked by a future session that doesn't know it was
+already done.
+
+**Next:**
+
+1. Carried from Day 23, still open: revocable access tokens (bearer-only,
+   15-minute exposure window after any revocation), and moving the token
+   and rate-limit prune sweeps off the in-process timer onto the documented
+   cron path for a real multi-instance deploy.
+2. Page-level suites for the remaining untested pages: CategoriesPage,
+   InventoryPage (read-only, so a smaller suite), StockMovementsPage and
+   PurchaseOrdersPage/SalesOrdersPage (the two multi-line order forms —
+   the biggest remaining gap, since they're also the two largest,
+   highest-logic page components with zero coverage), TeamPage, and
+   AccountPage.
+3. The rest of the accessibility pass carried from Day 23: `aria-live` on
+   the inline error banners, colour contrast, table semantics.
+
+**Blockers/decisions carried forward:**
+
+- None new. The detached-HEAD/stale-branch state fixed at the start of this
+  session wasn't a decision, just container-setup residue — recorded above
+  in case a future session hits the same starting state and wonders whether
+  it means lost work.

@@ -1767,3 +1767,189 @@ before it ever reached a commit.
 **Blockers/decisions carried forward:**
 
 - None new this session.
+
+## Day 23 (post-MVP) — 2026-08-28
+
+**Planned:** Nothing from the Day 22 list. The session opened with a
+request to "migrate this to React", and the frontend has been React since
+Day 1 — React 18, TypeScript, Vite, TanStack Query, Tailwind, react-router
+7, sixteen page components. There was no migration to do.
+
+What there was, once you look at why someone would ask: 5,698 lines of
+React with no automated tests at all. `eslint` and `tsc` both check that
+the code is well-formed; neither has an opinion about whether it does the
+right thing. Every frontend bug this log has recorded — the refresh token
+dropped at sign-in on Day 15, the query function handed TanStack's context
+as its first argument on Day 18 — was the kind a single rendered assertion
+would have caught before it shipped. So the day went on making the React
+that already exists trustworthy.
+
+**Shipped — a test harness (149 tests, from zero):**
+
+Vitest rather than Jest, because the config is already there: Vitest reads
+`vite.config.ts`, so the JSX transform under test is the one that ships
+rather than a second Babel pipeline configured to imitate it. jsdom for the
+environment, Testing Library for the queries, and `npm test` wired into CI
+next to the existing lint and build.
+
+Three decisions that shaped everything after them:
+
+- **`globals: false`.** Every suite imports `describe`/`it`/`expect` from
+  "vitest" by hand. That means `tsc -b` type-checks the tests along with
+  the rest of `src` with no `types` array to keep in sync — and since the
+  build script already runs `tsc -b`, a broken test file fails the build.
+- **A mock axios *adapter*, not `vi.mock("axios")`.** The adapter is the
+  last link in the chain, so a request still runs through the real request
+  interceptor that attaches the bearer token, and a real 401 still runs
+  through the real response interceptor that refreshes and retries.
+  Mocking the module out would have stubbed exactly the code most worth
+  testing.
+- **`src/test/render.tsx`** wraps a component in the same three providers
+  `main.tsx` does. Its QueryClient sets `retry: false`, which matters more
+  than it looks: with TanStack's default three retries, a test asserting an
+  error state renders the *loading* state until it times out, and the
+  failure reads as "the error never appeared" — which sends you into the
+  component instead of the query config.
+
+Coverage went to the things that fail quietly: the refresh interceptor (20
+tests — rotated token persisted, one shared refresh across a burst of
+simultaneous 401s, one retry only, auth endpoints excluded, the original
+error surfaced rather than the refresh failure); auth context and route
+guards (25); the confirmation dialog and its hook (21); the four auth pages
+(21); and CustomersPage end to end (22), which is the template the other
+five list pages follow.
+
+**Bugs found by writing them:**
+
+- **`ForgotPasswordPage` leaked an unhandled rejection.** It handled a
+  failed request with `try/finally` and no `catch`. The rendering was
+  right — the screen deliberately gives the same answer whether or not the
+  email exists, so the API's 404 must not reach the user — but the
+  rejection still escaped the handler. Every failed submit logged an
+  uncaught AxiosError, and any `unhandledrejection` reporter would have
+  filed it as a crash.
+- **The confirmation dialog threw focus out of itself the moment the user
+  confirmed.** `busy` was in the focus effect's dependency array, so
+  clicking Confirm re-ran it; the cleanup fired the "put the user back
+  where they came from on close" focus call while the dialog was still open
+  and mid-request, and the re-run couldn't take focus back because the
+  confirm button was disabled by then. The user was left tabbing around the
+  page underneath an open modal. Split into two effects — focus keyed on
+  `open` alone, the key handler on `[open, busy, onCancel]`. The regression
+  test was checked against the old dependency array first and does fail
+  there, so it holds the bug rather than the new code.
+
+**Also shipped — three fixes that are user-visible:**
+
+- **Search fired one HTTP request per keystroke.** Products, Customers and
+  Suppliers each put the raw input straight into a TanStack query key, and
+  a key change is a fetch. Typing "Northside" was nine tenant-scoped
+  `ILIKE` queries, nine cache entries nobody would ask for again, and nine
+  chances for a slow early response to land after a later one and repaint
+  the table with results for "Nor". `useDebouncedValue` keeps the box
+  controlled by the raw value and the query keyed on the settled one.
+  Clearing the box stays immediate — the effect returns early when the
+  value already matches — because making someone wait 300ms to see their
+  full list back reads as the page having hung.
+- **Every label in the app was a styled `<div>`.** 52 `<label>` tags, one
+  `htmlFor`. 51 inputs across 14 pages with no accessible name; clicking a
+  label focused nothing; a screen reader announced the sign-in form as two
+  fields called "edit text, blank". Ids are derived from `useId()` rather
+  than written literally, because two forms here genuinely reuse a field
+  name — StockMovements has a `productId` in the movement form, another in
+  the transfer form and a third in the filter bar — and `PurchaseOrderRow`
+  gets its own prefix rather than the page's, since the receiving form is
+  rendered once per order. Only attributes were added; no markup moved.
+- **Tab escaped the confirmation dialog.** `aria-modal="true"` tells a
+  screen reader the rest of the page is inert and does nothing at all about
+  the Tab key, so two Tabs put a keyboard user on the very row button the
+  dialog was asking them to confirm. Tab now cycles between Cancel and
+  Confirm in both directions, and does nothing at all while the request is
+  in flight and both buttons are disabled — going nowhere beats landing
+  behind the dialog.
+
+**Also shipped — two additions:**
+
+- **An error boundary**, which the app had nowhere in its tree. React's
+  default therefore applied: one bad `.map()` on one dashboard panel
+  unmounts the sidebar, the nav and every route with it, and the user gets
+  a white window with no way back — and a reload returns to the same route
+  and throws again. `AppErrorBoundary` sits inside the router and the auth
+  provider so it can offer three real exits: retry, back to dashboard
+  (which resets *before* navigating, since `resetKey` wouldn't change if
+  the crash happened on "/"), and sign out. The last one matters most: a
+  malformed cached session is among the few things that can crash every
+  route at once, and by then the sidebar holding the sign-out button has
+  gone down with the tree, leaving "clear site data in browser settings" as
+  the only fix. It shows `error.message` and never the stack; the full
+  error and component stack go to the console, which is this app's only
+  reporter.
+- **Honest empty states.** "No customers yet." is true for exactly one of
+  the three ways these tables come back empty. Search for a name nobody
+  matches and the page announced that the account had no customers at all —
+  alarming, wrong, and giving no hint that clearing the box brings them
+  back. Open the Archived tab, which is *supposed* to be empty most of the
+  time, and it said the same thing again. `emptyListMessage` picks the copy
+  from the filters actually in effect, preferring the search over the tab
+  (on Archived with a search running, "No archived customers." would be
+  misleading — there may well be plenty, just none matching) and quoting
+  the term back so a stray space is visible in the message rather than only
+  in the box the user has stopped looking at.
+
+**Maintenance:**
+
+- `endStoredSession()` extracted in `api/client.ts`. Clearing the tokens
+  and telling the app the session is gone were split across two files, with
+  the interceptor's catch block and AuthContext's handler each clearing
+  both tokens. Either half alone is a broken state — credentials with no
+  UI, or a signed-in UI with no credentials — so they now travel together.
+- The 14 commits that arrived on `origin/main` from a parallel session
+  since Day 18 were authored and committed as `Claude
+  <noreply@anthropic.com>` and carried `Co-Authored-By` and
+  `Claude-Session` trailers. Rewritten to `jeraldoalday
+  <jeraldoalday@gmail.com>` with the trailers stripped, backed up to a
+  local tag first, and force-pushed with `--force-with-lease`. This is the
+  third time; the drift comes from sessions whose environment supplies a
+  different default git identity.
+
+**Verified (all three services):** frontend `npm run lint`, `npm test`
+(149/149, up from 0) and `npm run build` — which type-checks the tests too,
+since they live under `src/`; backend `npx tsc --noEmit` on both configs,
+`npm run lint`, full Jest suite (320/320, unchanged — nothing under
+`backend/` moved today); python-service `python3 -m pytest -q` (44/44,
+likewise untouched).
+
+Not verified against a real browser or a real Postgres this session. No
+schema change was made and no backend code was touched, so there is no new
+migration and nothing in the class of bug Day 22 found by running against
+real SQL. The frontend changes are exercised by jsdom rather than a real
+rendering engine, which is the honest limit on the focus-trap and label
+work: jsdom implements the DOM APIs those tests assert on, but it is not
+what a screen reader talks to.
+
+**Next:**
+
+1. Carried from Day 22 and still open: revocable access tokens (bearer-only,
+   15-minute exposure window after any revocation), and moving the token and
+   rate-limit prune sweeps off the in-process timer onto the documented cron
+   path for a real multi-instance deploy.
+2. Also carried: audit the remaining `$queryRaw` call sites
+   (`dashboardStats.ts`, `rateLimit.ts`'s `hitRateLimit`) for the
+   bare-JS-number-into-a-typed-SQL-function trap, next time a session has
+   Postgres available.
+3. Now within reach, since there is a harness for it: page-level suites for
+   the five list pages CustomersPage stands in for, and for DashboardPage,
+   which has the most logic and the least coverage of anything on the
+   frontend.
+4. The rest of the accessibility pass — `aria-live` on the inline error
+   banners (a screen reader currently gets no announcement when an archive
+   is rejected), colour contrast, and table semantics. The labels and the
+   dialog are done; the app is not therefore accessible.
+
+**Blockers/decisions carried forward:**
+
+- The "migrate to React" framing is worth recording, since the same request
+  may come back. The frontend is React and has been since Day 1. If a
+  future session is asked this again, the answer is that there is nothing
+  to migrate — and the useful reading of the question is "make the React
+  better", which is what this day did.

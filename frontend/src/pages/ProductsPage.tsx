@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
@@ -34,6 +34,9 @@ function centsToInput(cents: number | undefined): string | undefined {
 }
 
 export function ProductsPage() {
+  // One stable prefix per mounted page, so every label points at its
+  // own control even where two forms reuse a field name.
+  const fieldId = useId();
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const isOwner = user?.role === "OWNER";
@@ -239,8 +242,9 @@ export function ProductsPage() {
           </div>
           {formError && <div className="col-span-2 text-sm text-red-600">{formError}</div>}
           <div>
-            <label className="block text-sm font-medium text-gray-700">SKU</label>
+            <label htmlFor={`${fieldId}-sku`} className="block text-sm font-medium text-gray-700">SKU</label>
             <input
+              id={`${fieldId}-sku`}
               name="sku"
               required
               defaultValue={editing?.sku}
@@ -248,8 +252,9 @@ export function ProductsPage() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700">Name</label>
+            <label htmlFor={`${fieldId}-name`} className="block text-sm font-medium text-gray-700">Name</label>
             <input
+              id={`${fieldId}-name`}
               name="name"
               required
               defaultValue={editing?.name}
@@ -257,8 +262,9 @@ export function ProductsPage() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700">Category</label>
+            <label htmlFor={`${fieldId}-categoryId`} className="block text-sm font-medium text-gray-700">Category</label>
             <select
+              id={`${fieldId}-categoryId`}
               name="categoryId"
               defaultValue={editing?.categoryId ?? ""}
               className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
@@ -289,8 +295,9 @@ export function ProductsPage() {
             {categoryError && <div className="mt-1 text-xs text-red-600">{categoryError}</div>}
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700">Price ($)</label>
+            <label htmlFor={`${fieldId}-price`} className="block text-sm font-medium text-gray-700">Price ($)</label>
             <input
+              id={`${fieldId}-price`}
               name="price"
               type="number"
               step="0.01"
@@ -301,8 +308,9 @@ export function ProductsPage() {
           </div>
           {isOwner && (
             <div>
-              <label className="block text-sm font-medium text-gray-700">Cost ($)</label>
+              <label htmlFor={`${fieldId}-cost`} className="block text-sm font-medium text-gray-700">Cost ($)</label>
               <input
+                id={`${fieldId}-cost`}
                 name="cost"
                 type="number"
                 step="0.01"
@@ -313,8 +321,9 @@ export function ProductsPage() {
             </div>
           )}
           <div>
-            <label className="block text-sm font-medium text-gray-700">Reorder point</label>
+            <label htmlFor={`${fieldId}-reorderPoint`} className="block text-sm font-medium text-gray-700">Reorder point</label>
             <input
+              id={`${fieldId}-reorderPoint`}
               name="reorderPoint"
               type="number"
               min="0"
@@ -323,8 +332,9 @@ export function ProductsPage() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700">Reorder quantity</label>
+            <label htmlFor={`${fieldId}-reorderQty`} className="block text-sm font-medium text-gray-700">Reorder quantity</label>
             <input
+              id={`${fieldId}-reorderQty`}
               name="reorderQty"
               type="number"
               min="0"

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { signup } from "../api/auth";
@@ -6,6 +6,9 @@ import { useAuth } from "../context/AuthContext";
 import { isApiError } from "../api/errors";
 
 export function SignupPage() {
+  // One stable prefix per mounted page, so every label points at its
+  // own control even where two forms reuse a field name.
+  const fieldId = useId();
   const navigate = useNavigate();
   const { setSession } = useAuth();
   const [organizationName, setOrganizationName] = useState("");
@@ -37,24 +40,27 @@ export function SignupPage() {
 
         {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
 
-        <label className="block text-sm font-medium text-gray-700">Business name</label>
+        <label htmlFor={`${fieldId}-businessName`} className="block text-sm font-medium text-gray-700">Business name</label>
         <input
+          id={`${fieldId}-businessName`}
           required
           value={organizationName}
           onChange={(e) => setOrganizationName(e.target.value)}
           className="mt-1 mb-4 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
         />
 
-        <label className="block text-sm font-medium text-gray-700">Your name</label>
+        <label htmlFor={`${fieldId}-yourName`} className="block text-sm font-medium text-gray-700">Your name</label>
         <input
+          id={`${fieldId}-yourName`}
           required
           value={name}
           onChange={(e) => setName(e.target.value)}
           className="mt-1 mb-4 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
         />
 
-        <label className="block text-sm font-medium text-gray-700">Email</label>
+        <label htmlFor={`${fieldId}-email`} className="block text-sm font-medium text-gray-700">Email</label>
         <input
+          id={`${fieldId}-email`}
           type="email"
           required
           value={email}
@@ -62,8 +68,9 @@ export function SignupPage() {
           className="mt-1 mb-4 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
         />
 
-        <label className="block text-sm font-medium text-gray-700">Password</label>
+        <label htmlFor={`${fieldId}-password`} className="block text-sm font-medium text-gray-700">Password</label>
         <input
+          id={`${fieldId}-password`}
           type="password"
           required
           minLength={8}

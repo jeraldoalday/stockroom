@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { resetPassword } from "../api/auth";
 import { isApiError } from "../api/errors";
 
 export function ResetPasswordPage() {
+  // One stable prefix per mounted page, so every label points at its
+  // own control even where two forms reuse a field name.
+  const fieldId = useId();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token") ?? "";
@@ -56,8 +59,9 @@ export function ResetPasswordPage() {
           <form onSubmit={handleSubmit}>
             {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
 
-            <label className="block text-sm font-medium text-gray-700">New password</label>
+            <label htmlFor={`${fieldId}-newPassword`} className="block text-sm font-medium text-gray-700">New password</label>
             <input
+              id={`${fieldId}-newPassword`}
               type="password"
               required
               minLength={8}
@@ -66,8 +70,9 @@ export function ResetPasswordPage() {
               className="mt-1 mb-4 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
             />
 
-            <label className="block text-sm font-medium text-gray-700">Confirm new password</label>
+            <label htmlFor={`${fieldId}-confirmNewPassword`} className="block text-sm font-medium text-gray-700">Confirm new password</label>
             <input
+              id={`${fieldId}-confirmNewPassword`}
               type="password"
               required
               minLength={8}

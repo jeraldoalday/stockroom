@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
@@ -26,6 +26,9 @@ function formatCents(cents: number): string {
 const MOVEMENT_TYPES = Object.keys(MOVEMENT_LABELS) as MovementType[];
 
 export function StockMovementsPage() {
+  // One stable prefix per mounted page, so every label points at its
+  // own control even where two forms reuse a field name.
+  const fieldId = useId();
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<"movement" | "transfer" | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -159,8 +162,9 @@ export function StockMovementsPage() {
         <form onSubmit={handleMovementSubmit} className="mb-6 grid grid-cols-2 gap-4 rounded-lg border border-gray-200 bg-white p-4">
           {formError && <div className="col-span-2 text-sm text-red-600">{formError}</div>}
           <div>
-            <label className="block text-sm font-medium text-gray-700">Type</label>
+            <label htmlFor={`${fieldId}-type`} className="block text-sm font-medium text-gray-700">Type</label>
             <select
+              id={`${fieldId}-type`}
               value={movementType}
               onChange={(e) => setMovementType(e.target.value as typeof movementType)}
               className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
@@ -171,10 +175,11 @@ export function StockMovementsPage() {
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700">
+            <label htmlFor={`${fieldId}-quantity`} className="block text-sm font-medium text-gray-700">
               Quantity {movementType === "ADJUSTMENT" ? "(signed delta)" : ""}
             </label>
             <input
+              id={`${fieldId}-quantity`}
               name="quantity"
               type="number"
               required
@@ -182,8 +187,8 @@ export function StockMovementsPage() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700">Product</label>
-            <select name="productId" required className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm">
+            <label htmlFor={`${fieldId}-productId`} className="block text-sm font-medium text-gray-700">Product</label>
+            <select id={`${fieldId}-productId`} name="productId" required className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm">
               <option value="">Select a product...</option>
               {productsQuery.data?.items.map((product) => (
                 <option key={product.id} value={product.id}>
@@ -193,8 +198,8 @@ export function StockMovementsPage() {
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700">Location</label>
-            <select name="locationId" required className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm">
+            <label htmlFor={`${fieldId}-locationId`} className="block text-sm font-medium text-gray-700">Location</label>
+            <select id={`${fieldId}-locationId`} name="locationId" required className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm">
               <option value="">Select a location...</option>
               {locationsQuery.data?.map((location) => (
                 <option key={location.id} value={location.id}>
@@ -205,10 +210,11 @@ export function StockMovementsPage() {
           </div>
           {movementType === "SALE" && (
             <div className="col-span-2">
-              <label className="block text-sm font-medium text-gray-700">
+              <label htmlFor={`${fieldId}-unitPrice`} className="block text-sm font-medium text-gray-700">
                 Unit price ($) <span className="text-gray-400">(optional)</span>
               </label>
               <input
+                id={`${fieldId}-unitPrice`}
                 name="unitPrice"
                 type="number"
                 step="0.01"
@@ -222,10 +228,11 @@ export function StockMovementsPage() {
             </div>
           )}
           <div className="col-span-2">
-            <label className="block text-sm font-medium text-gray-700">
+            <label htmlFor={`${fieldId}-reason`} className="block text-sm font-medium text-gray-700">
               Reason {movementType === "ADJUSTMENT" ? "(required)" : "(optional)"}
             </label>
             <input
+              id={`${fieldId}-reason`}
               name="reason"
               required={movementType === "ADJUSTMENT"}
               className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
@@ -247,8 +254,8 @@ export function StockMovementsPage() {
         <form onSubmit={handleTransferSubmit} className="mb-6 grid grid-cols-2 gap-4 rounded-lg border border-gray-200 bg-white p-4">
           {formError && <div className="col-span-2 text-sm text-red-600">{formError}</div>}
           <div>
-            <label className="block text-sm font-medium text-gray-700">Product</label>
-            <select name="productId" required className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm">
+            <label htmlFor={`${fieldId}-productId2`} className="block text-sm font-medium text-gray-700">Product</label>
+            <select id={`${fieldId}-productId2`} name="productId" required className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm">
               <option value="">Select a product...</option>
               {productsQuery.data?.items.map((product) => (
                 <option key={product.id} value={product.id}>
@@ -258,8 +265,9 @@ export function StockMovementsPage() {
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700">Quantity</label>
+            <label htmlFor={`${fieldId}-quantity2`} className="block text-sm font-medium text-gray-700">Quantity</label>
             <input
+              id={`${fieldId}-quantity2`}
               name="quantity"
               type="number"
               min="1"
@@ -268,8 +276,8 @@ export function StockMovementsPage() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700">From location</label>
-            <select name="fromLocationId" required className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm">
+            <label htmlFor={`${fieldId}-fromLocationId`} className="block text-sm font-medium text-gray-700">From location</label>
+            <select id={`${fieldId}-fromLocationId`} name="fromLocationId" required className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm">
               <option value="">Select a location...</option>
               {locationsQuery.data?.map((location) => (
                 <option key={location.id} value={location.id}>
@@ -279,8 +287,8 @@ export function StockMovementsPage() {
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700">To location</label>
-            <select name="toLocationId" required className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm">
+            <label htmlFor={`${fieldId}-toLocationId`} className="block text-sm font-medium text-gray-700">To location</label>
+            <select id={`${fieldId}-toLocationId`} name="toLocationId" required className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm">
               <option value="">Select a location...</option>
               {locationsQuery.data?.map((location) => (
                 <option key={location.id} value={location.id}>
@@ -290,8 +298,8 @@ export function StockMovementsPage() {
             </select>
           </div>
           <div className="col-span-2">
-            <label className="block text-sm font-medium text-gray-700">Reason (optional)</label>
-            <input name="reason" className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+            <label htmlFor={`${fieldId}-reason2`} className="block text-sm font-medium text-gray-700">Reason (optional)</label>
+            <input id={`${fieldId}-reason2`} name="reason" className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
           </div>
           <div className="col-span-2">
             <button
@@ -307,8 +315,9 @@ export function StockMovementsPage() {
 
       <div className="mb-4 flex flex-wrap items-end gap-3 rounded-lg border border-gray-200 bg-white p-3">
         <div>
-          <label className="block text-xs font-medium text-gray-500">Product</label>
+          <label htmlFor={`${fieldId}-product`} className="block text-xs font-medium text-gray-500">Product</label>
           <select
+            id={`${fieldId}-product`}
             value={filters.productId}
             onChange={(e) => updateFilter("productId", e.target.value)}
             className="mt-1 rounded-md border border-gray-300 px-3 py-1.5 text-sm"
@@ -322,8 +331,9 @@ export function StockMovementsPage() {
           </select>
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-500">Location</label>
+          <label htmlFor={`${fieldId}-location`} className="block text-xs font-medium text-gray-500">Location</label>
           <select
+            id={`${fieldId}-location`}
             value={filters.locationId}
             onChange={(e) => updateFilter("locationId", e.target.value)}
             className="mt-1 rounded-md border border-gray-300 px-3 py-1.5 text-sm"
@@ -337,8 +347,9 @@ export function StockMovementsPage() {
           </select>
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-500">Type</label>
+          <label htmlFor={`${fieldId}-type2`} className="block text-xs font-medium text-gray-500">Type</label>
           <select
+            id={`${fieldId}-type2`}
             value={filters.type}
             onChange={(e) => updateFilter("type", e.target.value)}
             className="mt-1 rounded-md border border-gray-300 px-3 py-1.5 text-sm"

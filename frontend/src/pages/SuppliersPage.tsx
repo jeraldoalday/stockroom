@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
@@ -20,6 +20,9 @@ const STATUS_TABS: { value: SupplierStatusFilter; label: string }[] = [
 ];
 
 export function SuppliersPage() {
+  // One stable prefix per mounted page, so every label points at its
+  // own control even where two forms reuse a field name.
+  const fieldId = useId();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   // Controlled by `search` for instant typing, keyed on the settled value
@@ -94,16 +97,16 @@ export function SuppliersPage() {
         <form onSubmit={handleCreate} className="mb-6 grid grid-cols-2 gap-4 rounded-lg border border-gray-200 bg-white p-4">
           {formError && <div className="col-span-2 text-sm text-red-600">{formError}</div>}
           <div>
-            <label className="block text-sm font-medium text-gray-700">Name</label>
-            <input name="name" required className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+            <label htmlFor={`${fieldId}-name`} className="block text-sm font-medium text-gray-700">Name</label>
+            <input id={`${fieldId}-name`} name="name" required className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700">Email</label>
-            <input name="email" type="email" className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+            <label htmlFor={`${fieldId}-email`} className="block text-sm font-medium text-gray-700">Email</label>
+            <input id={`${fieldId}-email`} name="email" type="email" className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700">Phone</label>
-            <input name="phone" className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+            <label htmlFor={`${fieldId}-phone`} className="block text-sm font-medium text-gray-700">Phone</label>
+            <input id={`${fieldId}-phone`} name="phone" className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
           </div>
           <div className="col-span-2">
             <button

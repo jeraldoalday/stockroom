@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
@@ -61,6 +61,9 @@ function PurchaseOrderRow({
   onReceiveSubmit,
   receivePending,
 }: RowProps) {
+  // Per row, not per page: the receiving form is rendered once for
+  // every order, so a shared prefix would put the same id on each.
+  const fieldId = useId();
   const detailQuery = useQuery({
     queryKey: ["purchase-orders", order.id],
     queryFn: () => fetchPurchaseOrder(order.id),
@@ -144,8 +147,8 @@ function PurchaseOrderRow({
             {detailQuery.isLoading && <div className="text-xs text-gray-500">Loading...</div>}
             {detailQuery.data?.lines && (
               <form onSubmit={handleSubmit} className="space-y-2">
-                <label className="block text-xs font-medium text-gray-700">Receiving location</label>
-                <select name="locationId" required className="w-full max-w-xs rounded-md border border-gray-300 px-3 py-2 text-sm">
+                <label htmlFor={`${fieldId}-locationId`} className="block text-xs font-medium text-gray-700">Receiving location</label>
+                <select id={`${fieldId}-locationId`} name="locationId" required className="w-full max-w-xs rounded-md border border-gray-300 px-3 py-2 text-sm">
                   <option value="">Select a location...</option>
                   {locations.map((location) => (
                     <option key={location.id} value={location.id}>{location.name}</option>
@@ -189,6 +192,9 @@ function PurchaseOrderRow({
 }
 
 export function PurchaseOrdersPage() {
+  // One stable prefix per mounted page, so every label points at its
+  // own control even where two forms reuse a field name.
+  const fieldId = useId();
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const isOwner = user?.role === "OWNER";
@@ -306,8 +312,8 @@ export function PurchaseOrdersPage() {
           {formError && <div className="text-sm text-red-600">{formError}</div>}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700">Supplier</label>
-              <select name="supplierId" required className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm">
+              <label htmlFor={`${fieldId}-supplierId`} className="block text-sm font-medium text-gray-700">Supplier</label>
+              <select id={`${fieldId}-supplierId`} name="supplierId" required className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm">
                 <option value="">Select a supplier...</option>
                 {suppliersQuery.data?.items.map((supplier) => (
                   <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
@@ -315,8 +321,8 @@ export function PurchaseOrdersPage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">Notes (optional)</label>
-              <input name="notes" className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+              <label htmlFor={`${fieldId}-notes`} className="block text-sm font-medium text-gray-700">Notes (optional)</label>
+              <input id={`${fieldId}-notes`} name="notes" className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
             </div>
           </div>
 

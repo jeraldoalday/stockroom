@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -58,6 +58,9 @@ function describeUserAgent(userAgent: string | null): string {
 }
 
 export function AccountPage() {
+  // One stable prefix per mounted page, so every label points at its
+  // own control even where two forms reuse a field name.
+  const fieldId = useId();
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -155,8 +158,9 @@ export function AccountPage() {
           </div>
         )}
         <div>
-          <label className="block text-sm font-medium text-gray-700">Current password</label>
+          <label htmlFor={`${fieldId}-currentPassword`} className="block text-sm font-medium text-gray-700">Current password</label>
           <input
+            id={`${fieldId}-currentPassword`}
             name="currentPassword"
             type="password"
             required
@@ -164,8 +168,9 @@ export function AccountPage() {
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700">New password</label>
+          <label htmlFor={`${fieldId}-newPassword`} className="block text-sm font-medium text-gray-700">New password</label>
           <input
+            id={`${fieldId}-newPassword`}
             name="newPassword"
             type="password"
             required
@@ -174,8 +179,9 @@ export function AccountPage() {
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700">Confirm new password</label>
+          <label htmlFor={`${fieldId}-confirmPassword`} className="block text-sm font-medium text-gray-700">Confirm new password</label>
           <input
+            id={`${fieldId}-confirmPassword`}
             name="confirmPassword"
             type="password"
             required

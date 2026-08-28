@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
@@ -26,6 +26,9 @@ function describeError(err: unknown, fallback: string): string {
 }
 
 export function CategoriesPage() {
+  // One stable prefix per mounted page, so every label points at its
+  // own control even where two forms reuse a field name.
+  const fieldId = useId();
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<CategoryStatusFilter>("active");
   const [showForm, setShowForm] = useState(false);
@@ -109,8 +112,8 @@ export function CategoriesPage() {
         <form onSubmit={handleCreate} className="mb-6 flex items-end gap-4 rounded-lg border border-gray-200 bg-white p-4">
           {formError && <div className="w-full text-sm text-red-600">{formError}</div>}
           <div className="flex-1">
-            <label className="block text-sm font-medium text-gray-700">Name</label>
-            <input name="name" required className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+            <label htmlFor={`${fieldId}-name`} className="block text-sm font-medium text-gray-700">Name</label>
+            <input id={`${fieldId}-name`} name="name" required className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
           </div>
           <button
             type="submit"

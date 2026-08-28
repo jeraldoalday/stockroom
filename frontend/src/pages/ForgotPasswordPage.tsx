@@ -1,9 +1,12 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { forgotPassword } from "../api/auth";
 
 export function ForgotPasswordPage() {
+  // One stable prefix per mounted page, so every label points at its
+  // own control even where two forms reuse a field name.
+  const fieldId = useId();
   const [email, setEmail] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -13,13 +16,17 @@ export function ForgotPasswordPage() {
     setSubmitting(true);
     try {
       await forgotPassword(email);
-    } finally {
-      // Always show the same confirmation, success or failure — the API
-      // itself never reveals whether the email matched an account, so the
-      // UI shouldn't either.
-      setSubmitting(false);
-      setSubmitted(true);
+    } catch {
+      // Swallowed, not just unhandled. A `finally` alone rendered the right
+      // thing but let the rejection escape the handler, so every failed
+      // request logged an uncaught AxiosError to the console — and any
+      // `unhandledrejection` listener would report a bug that isn't one.
     }
+    // Always the same confirmation, success or failure: the API itself
+    // never reveals whether the email matched an account, so neither can
+    // the UI. That is the whole point of the screen.
+    setSubmitting(false);
+    setSubmitted(true);
   }
 
   return (
@@ -33,8 +40,9 @@ export function ForgotPasswordPage() {
           </p>
         ) : (
           <form onSubmit={handleSubmit}>
-            <label className="block text-sm font-medium text-gray-700">Email</label>
+            <label htmlFor={`${fieldId}-email`} className="block text-sm font-medium text-gray-700">Email</label>
             <input
+              id={`${fieldId}-email`}
               type="email"
               required
               value={email}

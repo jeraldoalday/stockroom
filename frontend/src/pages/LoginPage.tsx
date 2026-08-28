@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { login } from "../api/auth";
@@ -6,6 +6,9 @@ import { useAuth } from "../context/AuthContext";
 import { isApiError } from "../api/errors";
 
 export function LoginPage() {
+  // One stable prefix per mounted page, so every label points at its
+  // own control even where two forms reuse a field name.
+  const fieldId = useId();
   const navigate = useNavigate();
   const location = useLocation();
   const { setSession } = useAuth();
@@ -49,8 +52,9 @@ export function LoginPage() {
         )}
         {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
 
-        <label className="block text-sm font-medium text-gray-700">Email</label>
+        <label htmlFor={`${fieldId}-email`} className="block text-sm font-medium text-gray-700">Email</label>
         <input
+          id={`${fieldId}-email`}
           type="email"
           required
           value={email}
@@ -58,8 +62,9 @@ export function LoginPage() {
           className="mt-1 mb-4 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
         />
 
-        <label className="block text-sm font-medium text-gray-700">Password</label>
+        <label htmlFor={`${fieldId}-password`} className="block text-sm font-medium text-gray-700">Password</label>
         <input
+          id={`${fieldId}-password`}
           type="password"
           required
           value={password}

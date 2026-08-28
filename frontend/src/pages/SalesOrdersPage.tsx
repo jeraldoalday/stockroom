@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
@@ -97,6 +97,9 @@ function SalesOrderRow({ order, products, expanded, onToggleExpand, onCancel, on
 }
 
 export function SalesOrdersPage() {
+  // One stable prefix per mounted page, so every label points at its
+  // own control even where two forms reuse a field name.
+  const fieldId = useId();
   const queryClient = useQueryClient();
 
   const [showForm, setShowForm] = useState(false);
@@ -186,8 +189,8 @@ export function SalesOrdersPage() {
           {formError && <div className="text-sm text-red-600">{formError}</div>}
           <div className="grid grid-cols-3 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700">Customer (optional)</label>
-              <select name="customerId" className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm">
+              <label htmlFor={`${fieldId}-customerId`} className="block text-sm font-medium text-gray-700">Customer (optional)</label>
+              <select id={`${fieldId}-customerId`} name="customerId" className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm">
                 <option value="">Walk-in</option>
                 {customersQuery.data?.items.map((customer) => (
                   <option key={customer.id} value={customer.id}>{customer.name}</option>
@@ -195,8 +198,8 @@ export function SalesOrdersPage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">Location</label>
-              <select name="locationId" required className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm">
+              <label htmlFor={`${fieldId}-locationId`} className="block text-sm font-medium text-gray-700">Location</label>
+              <select id={`${fieldId}-locationId`} name="locationId" required className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm">
                 <option value="">Select a location...</option>
                 {locationsQuery.data?.map((location) => (
                   <option key={location.id} value={location.id}>{location.name}</option>
@@ -204,8 +207,8 @@ export function SalesOrdersPage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">Notes (optional)</label>
-              <input name="notes" className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+              <label htmlFor={`${fieldId}-notes`} className="block text-sm font-medium text-gray-700">Notes (optional)</label>
+              <input id={`${fieldId}-notes`} name="notes" className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
             </div>
           </div>
 

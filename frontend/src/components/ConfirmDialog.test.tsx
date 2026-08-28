@@ -118,6 +118,85 @@ describe("ConfirmDialog", () => {
     expect(screen.queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
   });
 
+  it("keeps Tab inside the dialog", async () => {
+    // `aria-modal` tells a screen reader the rest of the page is inert; it
+    // does nothing at all about the Tab key. Without a trap the next Tab
+    // lands on the very row button the dialog is asking about.
+    render(
+      <>
+        <button type="button">Behind the dialog</button>
+        <ConfirmDialog open title="Archive?" description="Sure?" onConfirm={vi.fn()} onCancel={vi.fn()} />
+      </>
+    );
+    const user = userEvent.setup();
+    const confirm = screen.getByRole("button", { name: "Confirm" });
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+
+    expect(confirm).toHaveFocus();
+    await user.tab();
+    expect(cancel).toHaveFocus();
+    await user.tab();
+    expect(confirm).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Behind the dialog" })).not.toHaveFocus();
+  });
+
+  it("wraps backwards too", async () => {
+    render(<ConfirmDialog open title="Archive?" description="Sure?" onConfirm={vi.fn()} onCancel={vi.fn()} />);
+    const user = userEvent.setup();
+
+    await user.tab({ shift: true });
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
+  });
+
+  it("keeps focus inside the dialog while the request is in flight", async () => {
+    // Both buttons are disabled mid-request, so there is nothing in the
+    // dialog to tab to. Going nowhere beats landing behind it.
+    render(
+      <>
+        <button type="button">Behind the dialog</button>
+        <ConfirmDialog open busy title="Archive?" description="Sure?" onConfirm={vi.fn()} onCancel={vi.fn()} />
+      </>
+    );
+    const user = userEvent.setup();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Behind the dialog" })).not.toHaveFocus();
+  });
+
+  it("does not hand focus back to the page when the request starts", async () => {
+    // The bug: `busy` was a dependency of the focus effect, so clicking
+    // Confirm re-ran it. The cleanup fired `previouslyFocused.focus()` and
+    // dropped the user on the row button behind a modal that was still
+    // open, mid-request — and the re-run couldn't take focus back, because
+    // by then the confirm button was disabled.
+    function Host() {
+      const [open, setOpen] = useState(false);
+      const [busy, setBusy] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            Archive supplier
+          </button>
+          <ConfirmDialog
+            open={open}
+            busy={busy}
+            title="Archive?"
+            description="Sure?"
+            onConfirm={() => setBusy(true)}
+            onCancel={vi.fn()}
+          />
+        </>
+      );
+    }
+    const user = userEvent.setup();
+    render(<Host />);
+
+    await user.click(screen.getByRole("button", { name: "Archive supplier" }));
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+
+    expect(screen.getByRole("button", { name: "Working..." })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Archive supplier" })).not.toHaveFocus();
+  });
+
   it("styles a danger confirm differently from a neutral one", () => {
     const { unmount } = setup({ tone: "danger", confirmLabel: "Delete" });
     expect(screen.getByRole("button", { name: "Delete" }).className).toContain("bg-red-600");

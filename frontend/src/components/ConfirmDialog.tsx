@@ -1,6 +1,14 @@
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
+/**
+ * Tabbable descendants, in document order. `[...]` on the NodeList keeps
+ * that order, which is what makes "first" and "last" meaningful.
+ */
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), ' +
+  'textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 export interface ConfirmDialogProps {
   open: boolean;
   title: string;
@@ -35,29 +43,67 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
 
-  // Escape cancels, and focus moves into the dialog on open and back to
-  // whatever opened it on close — otherwise a keyboard user is dropped at
-  // the top of the document after every confirmation.
+  // Focus moves into the dialog on open and back to whatever opened it on
+  // close — otherwise a keyboard user is dropped at the top of the document
+  // after every confirmation and has to tab through the whole table again.
+  //
+  // Keyed on `open` alone, deliberately. With `busy` in here too, clicking
+  // Confirm re-ran the effect: the cleanup fired `previouslyFocused.focus()`
+  // and sent focus back to the row button *behind the still-open modal*,
+  // then the re-run failed to take it back because the confirm button was by
+  // then disabled. The user was left tabbing around the page underneath an
+  // open dialog.
   useEffect(() => {
     if (!open) return undefined;
 
     previouslyFocused.current = document.activeElement as HTMLElement | null;
     confirmRef.current?.focus();
 
+    return () => previouslyFocused.current?.focus();
+  }, [open]);
+
+  // Escape cancels, and Tab is confined to the dialog. `aria-modal` tells a
+  // screen reader the rest of the page is inert but does nothing about the
+  // Tab key, so without this a keyboard user tabs straight out of the
+  // dialog and onto the controls it is asking them to confirm.
+  useEffect(() => {
+    if (!open) return undefined;
+
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape" && !busy) {
         onCancel();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+
+      const focusable = [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE)];
+      if (focusable.length === 0) {
+        // Everything is disabled mid-request. There is nowhere to go, so
+        // going nowhere beats landing behind the dialog.
+        event.preventDefault();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      const outside = !(active instanceof Node) || !dialog.contains(active);
+
+      if (event.shiftKey ? active === first || outside : active === last || outside) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
       }
     }
 
     document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      previouslyFocused.current?.focus();
-    };
+    return () => document.removeEventListener("keydown", handleKeyDown);
   }, [open, busy, onCancel]);
 
   if (!open) return null;
@@ -77,6 +123,7 @@ export function ConfirmDialog({
         aria-hidden="true"
       />
       <div
+        ref={dialogRef}
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="confirm-dialog-title"

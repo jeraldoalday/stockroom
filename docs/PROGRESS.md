@@ -2053,3 +2053,81 @@ already done.
   session wasn't a decision, just container-setup residue — recorded above
   in case a future session hits the same starting state and wonders whether
   it means lost work.
+
+## Day 25 (post-MVP) — 2026-08-29
+
+**Planned:** the "biggest remaining gap" named on the Day 24 list — page-
+level suites for PurchaseOrdersPage, SalesOrdersPage, and StockMovementsPage,
+the three largest, highest-logic page components that had zero frontend
+test coverage.
+
+**Shipped — three page-level test suites (71 tests):**
+
+- **PurchaseOrdersPage** (29 tests): the create form and every status action
+  (Mark as ordered, Cancel) are Owner-gated, asserted from both sides —
+  Staff sees neither the New-purchase-order button nor those row actions,
+  regardless of an order's status; receiving is asserted as reachable to
+  Staff too, since it isn't Owner-gated on the backend either. Covers the
+  line-item add/remove controls, the client-side "add at least one line"
+  guard, that an unselected second line is silently dropped from the
+  payload rather than rejecting the whole submit, the Unit-cost column's
+  Owner/Staff visibility in the expanded detail panel, and the receiving
+  form's per-line remaining-quantity prefill (`ordered - received`) together
+  with its exclusion of lines already fully received.
+- **SalesOrdersPage** (20 tests): the mirror image with no Owner gate on
+  anything, matching the persona split this log has recorded since Day 8 —
+  Staff gets the create form and Fulfill/Cancel same as an Owner. Covers a
+  blank Customer field posting `customerId: null` rather than an empty
+  string, and that unit *price* (unlike cost) renders identically for
+  Staff, since PRD §4 withholds margin data, not what something sold for.
+- **StockMovementsPage** (22 tests): two independent forms — record a
+  movement, transfer between locations — plus a three-field filter bar and
+  pagination, all previously untested. Covers the Sale-only unit price
+  field, the Adjustment type's required-reason and signed-delta quantity
+  label, dollar-to-cents payload conversion (and omitting the price key
+  entirely rather than sending `0` when it's left blank on a non-required
+  sale), that Record-movement and Transfer-stock are mutually exclusive
+  (opening one replaces the other, not stacks it), and that changing any
+  filter resets the page number — the same "stuck on page 4 of a filtered
+  view that only has one page" bug class `CustomersPage`'s suite already
+  covers for search.
+- One bug in the tests, not the app, encountered twice: the movement/
+  transfer forms' Quantity, Unit price, and Unit cost inputs are controlled
+  React state with a `Number(value) || 1` (or `|| 0`) fallback on empty —
+  so `user.clear()` followed by `user.type("3")` doesn't produce "3", it
+  bounces back to "1" on the clear and then appends, landing on "13".
+  `fireEvent.change(input, { target: { value: "3" } })` sets it in one shot
+  instead, the way a real number-input spinner or a paste would. A second,
+  unrelated ambiguity: the always-rendered filter bar's `<option>` elements
+  (`Warehouse`, `Received`, ...) carry the exact same text as the movement
+  table's cells, so a bare `getByText` match against either is ambiguous
+  the moment a row exists — `getByRole("cell", { name })` disambiguates,
+  since an `<option>` isn't a `cell`.
+
+**Verified:** frontend `npm run lint`, `npm test` (278/278, up from 207 —
+the 71 new tests plus everything from Day 23-24), and `npm run build`
+(which type-checks the tests too, since they live under `src/`); backend
+`npx tsc --noEmit`, full Jest suite (320/320, unchanged — no backend file
+touched this session); python-service `pytest -q` (44/44, likewise
+unchanged). All clean.
+
+Not run against a real Postgres or a real browser this session, same
+reasoning as Day 24: no production code changed, only new test files
+exercised through Vitest's jsdom environment.
+
+**Next:**
+
+1. Page-level suites for what's left: CategoriesPage, InventoryPage
+   (read-only, smaller), TeamPage, and AccountPage — none of the "biggest
+   gap" urgency Day 24 flagged for the three this session closed, but still
+   the last frontend pages with zero coverage.
+2. Carried from Day 22-24, still open: revocable access tokens
+   (bearer-only, 15-minute exposure window after any revocation), and
+   moving the token/rate-limit prune sweeps off the in-process timer onto
+   the documented cron path for a real multi-instance deploy.
+3. The rest of the accessibility pass carried from Day 23-24: `aria-live`
+   on the inline error banners, colour contrast, table semantics.
+
+**Blockers/decisions carried forward:**
+
+- None new.

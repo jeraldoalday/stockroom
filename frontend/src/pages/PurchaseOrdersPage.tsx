@@ -119,10 +119,10 @@ function PurchaseOrderRow({
               <table className="min-w-full text-xs">
                 <thead>
                   <tr className="text-gray-500">
-                    <th className="py-1 text-left">Product</th>
-                    <th className="py-1 text-right">Ordered</th>
-                    <th className="py-1 text-right">Received</th>
-                    {isOwner && <th className="py-1 text-right">Unit cost</th>}
+                    <th scope="col" className="py-1 text-left">Product</th>
+                    <th scope="col" className="py-1 text-right">Ordered</th>
+                    <th scope="col" className="py-1 text-right">Received</th>
+                    {isOwner && <th scope="col" className="py-1 text-right">Unit cost</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -392,10 +392,10 @@ export function PurchaseOrdersPage() {
         <table className="min-w-full divide-y divide-gray-200 text-sm">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-4 py-2 text-left font-medium text-gray-600">Supplier</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-600">Status</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-600">Created</th>
-              <th className="px-4 py-2 text-right font-medium text-gray-600">Actions</th>
+              <th scope="col" className="px-4 py-2 text-left font-medium text-gray-600">Supplier</th>
+              <th scope="col" className="px-4 py-2 text-left font-medium text-gray-600">Status</th>
+              <th scope="col" className="px-4 py-2 text-left font-medium text-gray-600">Created</th>
+              <th scope="col" className="px-4 py-2 text-right font-medium text-gray-600">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">

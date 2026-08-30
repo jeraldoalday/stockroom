@@ -67,9 +67,9 @@ export function DashboardPage() {
             <table className="min-w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-2 text-left font-medium text-gray-600">Product</th>
-                  <th className="px-4 py-2 text-right font-medium text-gray-600">On hand</th>
-                  <th className="px-4 py-2 text-right font-medium text-gray-600">Reorder point</th>
+                  <th scope="col" className="px-4 py-2 text-left font-medium text-gray-600">Product</th>
+                  <th scope="col" className="px-4 py-2 text-right font-medium text-gray-600">On hand</th>
+                  <th scope="col" className="px-4 py-2 text-right font-medium text-gray-600">Reorder point</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -108,9 +108,9 @@ export function DashboardPage() {
             <table className="min-w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-2 text-left font-medium text-gray-600">Product</th>
-                  <th className="px-4 py-2 text-left font-medium text-gray-600">Type</th>
-                  <th className="px-4 py-2 text-right font-medium text-gray-600">Qty</th>
+                  <th scope="col" className="px-4 py-2 text-left font-medium text-gray-600">Product</th>
+                  <th scope="col" className="px-4 py-2 text-left font-medium text-gray-600">Type</th>
+                  <th scope="col" className="px-4 py-2 text-right font-medium text-gray-600">Qty</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -152,9 +152,9 @@ export function DashboardPage() {
           <table className="min-w-full divide-y divide-gray-200 text-sm">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-4 py-2 text-left font-medium text-gray-600">Product</th>
-                <th className="px-4 py-2 text-right font-medium text-gray-600">Units sold</th>
-                <th className="px-4 py-2 text-right font-medium text-gray-600">Value at list price</th>
+                <th scope="col" className="px-4 py-2 text-left font-medium text-gray-600">Product</th>
+                <th scope="col" className="px-4 py-2 text-right font-medium text-gray-600">Units sold</th>
+                <th scope="col" className="px-4 py-2 text-right font-medium text-gray-600">Value at list price</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">

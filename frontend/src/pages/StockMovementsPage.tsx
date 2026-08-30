@@ -380,14 +380,14 @@ export function StockMovementsPage() {
         <table className="min-w-full divide-y divide-gray-200 text-sm">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-4 py-2 text-left font-medium text-gray-600">Date</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-600">Product</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-600">Location</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-600">Type</th>
-              <th className="px-4 py-2 text-right font-medium text-gray-600">Qty</th>
-              <th className="px-4 py-2 text-right font-medium text-gray-600">Unit price</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-600">Reason</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-600">Recorded by</th>
+              <th scope="col" className="px-4 py-2 text-left font-medium text-gray-600">Date</th>
+              <th scope="col" className="px-4 py-2 text-left font-medium text-gray-600">Product</th>
+              <th scope="col" className="px-4 py-2 text-left font-medium text-gray-600">Location</th>
+              <th scope="col" className="px-4 py-2 text-left font-medium text-gray-600">Type</th>
+              <th scope="col" className="px-4 py-2 text-right font-medium text-gray-600">Qty</th>
+              <th scope="col" className="px-4 py-2 text-right font-medium text-gray-600">Unit price</th>
+              <th scope="col" className="px-4 py-2 text-left font-medium text-gray-600">Reason</th>
+              <th scope="col" className="px-4 py-2 text-left font-medium text-gray-600">Recorded by</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">

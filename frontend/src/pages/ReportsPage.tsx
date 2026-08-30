@@ -144,11 +144,11 @@ export function ReportsPage() {
             <table className="min-w-full text-sm">
               <thead>
                 <tr className="text-left text-gray-500">
-                  <th className="py-1.5 pr-4">Product</th>
-                  <th className="py-1.5 pr-4">On hand</th>
-                  <th className="py-1.5 pr-4">Avg daily demand</th>
-                  <th className="py-1.5 pr-4">Days of stock left</th>
-                  <th className="py-1.5 pr-4">Suggested reorder qty</th>
+                  <th scope="col" className="py-1.5 pr-4">Product</th>
+                  <th scope="col" className="py-1.5 pr-4">On hand</th>
+                  <th scope="col" className="py-1.5 pr-4">Avg daily demand</th>
+                  <th scope="col" className="py-1.5 pr-4">Days of stock left</th>
+                  <th scope="col" className="py-1.5 pr-4">Suggested reorder qty</th>
                 </tr>
               </thead>
               <tbody>
@@ -220,10 +220,10 @@ export function ReportsPage() {
                 <table className="min-w-full text-sm">
                   <thead>
                     <tr className="text-left text-gray-500">
-                      <th className="py-1.5 pr-4">Product</th>
-                      <th className="py-1.5 pr-4">On hand</th>
-                      <th className="py-1.5 pr-4">Tied up (at cost)</th>
-                      <th className="py-1.5 pr-4">Last sold</th>
+                      <th scope="col" className="py-1.5 pr-4">Product</th>
+                      <th scope="col" className="py-1.5 pr-4">On hand</th>
+                      <th scope="col" className="py-1.5 pr-4">Tied up (at cost)</th>
+                      <th scope="col" className="py-1.5 pr-4">Last sold</th>
                     </tr>
                   </thead>
                   <tbody>

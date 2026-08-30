@@ -221,11 +221,11 @@ export function AccountPage() {
           <table className="min-w-full divide-y divide-gray-200 text-sm">
             <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
               <tr>
-                <th className="px-4 py-2">Device</th>
-                <th className="px-4 py-2">Signed in</th>
-                <th className="px-4 py-2">Last active</th>
-                <th className="px-4 py-2">Expires</th>
-                <th className="px-4 py-2" />
+                <th scope="col" className="px-4 py-2">Device</th>
+                <th scope="col" className="px-4 py-2">Signed in</th>
+                <th scope="col" className="px-4 py-2">Last active</th>
+                <th scope="col" className="px-4 py-2">Expires</th>
+                <th scope="col" className="px-4 py-2" />
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">

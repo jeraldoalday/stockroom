@@ -72,9 +72,9 @@ function SalesOrderRow({ order, products, expanded, onToggleExpand, onCancel, on
               <table className="min-w-full text-xs">
                 <thead>
                   <tr className="text-gray-500">
-                    <th className="py-1 text-left">Product</th>
-                    <th className="py-1 text-right">Quantity</th>
-                    <th className="py-1 text-right">Unit price</th>
+                    <th scope="col" className="py-1 text-left">Product</th>
+                    <th scope="col" className="py-1 text-right">Quantity</th>
+                    <th scope="col" className="py-1 text-right">Unit price</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -278,10 +278,10 @@ export function SalesOrdersPage() {
         <table className="min-w-full divide-y divide-gray-200 text-sm">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-4 py-2 text-left font-medium text-gray-600">Customer</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-600">Status</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-600">Created</th>
-              <th className="px-4 py-2 text-right font-medium text-gray-600">Actions</th>
+              <th scope="col" className="px-4 py-2 text-left font-medium text-gray-600">Customer</th>
+              <th scope="col" className="px-4 py-2 text-left font-medium text-gray-600">Status</th>
+              <th scope="col" className="px-4 py-2 text-left font-medium text-gray-600">Created</th>
+              <th scope="col" className="px-4 py-2 text-right font-medium text-gray-600">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">

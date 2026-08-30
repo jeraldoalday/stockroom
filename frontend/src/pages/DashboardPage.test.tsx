@@ -146,6 +146,18 @@ describe("DashboardPage low stock panel", () => {
 
     expect(await screen.findByText("Nothing is low on stock.")).toBeInTheDocument();
   });
+
+  it("reports a failed low-stock load instead of an empty table", async () => {
+    // This query previously had no isError branch at all: a failed load
+    // rendered nothing, indistinguishable from "nothing is low on stock".
+    api.on("GET", "/dashboard/summary", ok(summary()));
+    api.on("GET", "/dashboard/low-stock", fail(500, "boom"));
+    api.on("GET", "/dashboard/top-movers", ok(topMovers()));
+    renderPage();
+
+    expect(await screen.findByText("Failed to load low stock.")).toBeInTheDocument();
+    expect(screen.queryByText("Nothing is low on stock.")).not.toBeInTheDocument();
+  });
 });
 
 describe("DashboardPage recent activity panel", () => {

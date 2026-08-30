@@ -40,7 +40,7 @@ export function DashboardPage() {
       <h1 className="text-2xl font-semibold text-gray-900">Welcome back, {user?.name}</h1>
 
       {summaryQuery.isError && (
-        <p className="mt-4 text-sm text-red-600">Failed to load the dashboard.</p>
+        <p role="alert" className="mt-4 text-sm text-red-600">Failed to load the dashboard.</p>
       )}
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -76,6 +76,11 @@ export function DashboardPage() {
                 {lowStockQuery.isLoading && (
                   <tr>
                     <td colSpan={3} className="px-4 py-6 text-center text-gray-500">Loading...</td>
+                  </tr>
+                )}
+                {lowStockQuery.isError && (
+                  <tr>
+                    <td colSpan={3} role="alert" className="px-4 py-6 text-center text-red-600">Failed to load low stock.</td>
                   </tr>
                 )}
                 {lowStockQuery.data?.items.length === 0 && (
@@ -160,7 +165,7 @@ export function DashboardPage() {
               )}
               {topMoversQuery.isError && (
                 <tr>
-                  <td colSpan={3} className="px-4 py-6 text-center text-red-600">Failed to load top movers.</td>
+                  <td colSpan={3} role="alert" className="px-4 py-6 text-center text-red-600">Failed to load top movers.</td>
                 </tr>
               )}
               {topMoversQuery.data?.items.length === 0 && (

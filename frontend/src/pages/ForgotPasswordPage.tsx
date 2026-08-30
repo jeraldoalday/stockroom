@@ -35,7 +35,7 @@ export function ForgotPasswordPage() {
         <h1 className="text-xl font-semibold text-brand-700 mb-6">Reset your password</h1>
 
         {submitted ? (
-          <p className="text-sm text-gray-700">
+          <p role="status" className="text-sm text-gray-700">
             If an account exists for that email, we've sent instructions to reset your password.
           </p>
         ) : (

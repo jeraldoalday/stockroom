@@ -100,7 +100,7 @@ export function TeamPage() {
 
       {showForm && (
         <form onSubmit={handleInvite} className="mb-6 grid grid-cols-2 gap-4 rounded-lg border border-gray-200 bg-white p-4">
-          {formError && <div className="col-span-2 text-sm text-red-600">{formError}</div>}
+          {formError && <div role="alert" className="col-span-2 text-sm text-red-600">{formError}</div>}
           <div>
             <label htmlFor={`${fieldId}-name`} className="block text-sm font-medium text-gray-700">Name</label>
             <input id={`${fieldId}-name`} name="name" required className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
@@ -131,8 +131,8 @@ export function TeamPage() {
         </form>
       )}
 
-      {rowError && <div className="mb-4 text-sm text-red-600">{rowError}</div>}
-      {rowNotice && <div className="mb-4 text-sm text-green-700">{rowNotice}</div>}
+      {rowError && <div role="alert" className="mb-4 text-sm text-red-600">{rowError}</div>}
+      {rowNotice && <div role="status" className="mb-4 text-sm text-green-700">{rowNotice}</div>}
 
       <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
         <table className="min-w-full divide-y divide-gray-200 text-sm">
@@ -152,7 +152,7 @@ export function TeamPage() {
             )}
             {membersQuery.isError && (
               <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-red-600">Failed to load team members.</td>
+                <td colSpan={4} role="alert" className="px-4 py-6 text-center text-red-600">Failed to load team members.</td>
               </tr>
             )}
             {membersQuery.data?.items.map((member) => {

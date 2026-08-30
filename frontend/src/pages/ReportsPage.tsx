@@ -102,7 +102,7 @@ export function ReportsPage() {
       <div className="mt-6 rounded-lg border border-gray-200 bg-white p-4">
         <h2 className="text-lg font-semibold text-gray-900">Daily sales vs. receiving</h2>
         {trendQuery.isLoading && <p className="mt-3 text-sm text-gray-500">Loading...</p>}
-        {trendQuery.isError && <p className="mt-3 text-sm text-red-600">Failed to load the trend report.</p>}
+        {trendQuery.isError && <p role="alert" className="mt-3 text-sm text-red-600">Failed to load the trend report.</p>}
         {trendQuery.data?.series.length === 0 && (
           <p className="mt-3 text-sm text-gray-500">No stock movements in the last {days} days.</p>
         )}
@@ -135,7 +135,7 @@ export function ReportsPage() {
           {reorderQuery.data?.days ?? 30}-day average daily demand.
         </p>
         {reorderQuery.isLoading && <p className="mt-3 text-sm text-gray-500">Loading...</p>}
-        {reorderQuery.isError && <p className="mt-3 text-sm text-red-600">Failed to load reorder suggestions.</p>}
+        {reorderQuery.isError && <p role="alert" className="mt-3 text-sm text-red-600">Failed to load reorder suggestions.</p>}
         {reorderQuery.data?.items.length === 0 && (
           <p className="mt-3 text-sm text-gray-500">No products are at or below their reorder point.</p>
         )}
@@ -202,7 +202,7 @@ export function ReportsPage() {
 
           {deadStockQuery.isLoading && <p className="mt-3 text-sm text-gray-500">Loading...</p>}
           {deadStockQuery.isError && (
-            <p className="mt-3 text-sm text-red-600">Failed to load the dead-stock report.</p>
+            <p role="alert" className="mt-3 text-sm text-red-600">Failed to load the dead-stock report.</p>
           )}
           {deadStockQuery.data?.items.length === 0 && (
             <p className="mt-3 text-sm text-gray-500">
@@ -256,7 +256,7 @@ export function ReportsPage() {
 
       <div className="mt-6 rounded-lg border border-gray-200 bg-white p-4">
         <h2 className="text-lg font-semibold text-gray-900">Export CSV</h2>
-        {exportError && <p className="mt-2 text-sm text-red-600">{exportError}</p>}
+        {exportError && <p role="alert" className="mt-2 text-sm text-red-600">{exportError}</p>}
         <div className="mt-3 flex flex-wrap gap-2">
           {(Object.keys(EXPORT_LABELS) as ExportKind[])
             // Owner-only server-side, same as the dead-stock report itself —

@@ -150,9 +150,9 @@ export function AccountPage() {
         onSubmit={handleSubmit}
         className="grid max-w-md grid-cols-1 gap-4 rounded-lg border border-gray-200 bg-white p-4"
       >
-        {formError && <div className="text-sm text-red-600">{formError}</div>}
+        {formError && <div role="alert" className="text-sm text-red-600">{formError}</div>}
         {success && (
-          <div className="text-sm text-green-700">
+          <div role="status" className="text-sm text-green-700">
             Password updated. This signed you out everywhere, including here — taking you to the
             sign-in page...
           </div>
@@ -207,12 +207,12 @@ export function AccountPage() {
         have to hand.
       </p>
 
-      {sessionError && <div className="mb-3 text-sm text-red-600">{sessionError}</div>}
+      {sessionError && <div role="alert" className="mb-3 text-sm text-red-600">{sessionError}</div>}
 
       <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
         {sessionsQuery.isLoading && <div className="p-4 text-sm text-gray-500">Loading sessions...</div>}
         {sessionsQuery.isError && (
-          <div className="p-4 text-sm text-red-600">Could not load your sessions.</div>
+          <div role="alert" className="p-4 text-sm text-red-600">Could not load your sessions.</div>
         )}
         {sessionsQuery.data && sessionsQuery.data.length === 0 && (
           <div className="p-4 text-sm text-gray-500">No other sessions.</div>

@@ -111,7 +111,7 @@ export function CategoriesPage() {
 
       {showForm && (
         <form onSubmit={handleCreate} className="mb-6 flex items-end gap-4 rounded-lg border border-gray-200 bg-white p-4">
-          {formError && <div className="w-full text-sm text-red-600">{formError}</div>}
+          {formError && <div role="alert" className="w-full text-sm text-red-600">{formError}</div>}
           <div className="flex-1">
             <label htmlFor={`${fieldId}-name`} className="block text-sm font-medium text-gray-700">Name</label>
             <input id={`${fieldId}-name`} name="name" required className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
@@ -145,7 +145,7 @@ export function CategoriesPage() {
         ))}
       </div>
 
-      {rowError && <div className="mb-4 text-sm text-red-600">{rowError}</div>}
+      {rowError && <div role="alert" className="mb-4 text-sm text-red-600">{rowError}</div>}
 
       <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
         <table className="min-w-full divide-y divide-gray-200 text-sm">
@@ -163,7 +163,7 @@ export function CategoriesPage() {
             )}
             {categoriesQuery.isError && (
               <tr>
-                <td colSpan={2} className="px-4 py-6 text-center text-red-600">Failed to load categories.</td>
+                <td colSpan={2} role="alert" className="px-4 py-6 text-center text-red-600">Failed to load categories.</td>
               </tr>
             )}
             {categoriesQuery.data?.length === 0 && (

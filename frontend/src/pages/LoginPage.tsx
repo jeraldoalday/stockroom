@@ -41,16 +41,16 @@ export function LoginPage() {
         <h1 className="text-xl font-semibold text-brand-700 mb-6">Sign in to StockRoom</h1>
 
         {resetSuccess && (
-          <div className="mb-4 text-sm text-green-700">
+          <div role="status" className="mb-4 text-sm text-green-700">
             Your password has been reset. Sign in with your new password.
           </div>
         )}
         {inviteAccepted && (
-          <div className="mb-4 text-sm text-green-700">
+          <div role="status" className="mb-4 text-sm text-green-700">
             Your password is set. Sign in to get started.
           </div>
         )}
-        {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
+        {error && <div role="alert" className="mb-4 text-sm text-red-600">{error}</div>}
 
         <label htmlFor={`${fieldId}-email`} className="block text-sm font-medium text-gray-700">Email</label>
         <input

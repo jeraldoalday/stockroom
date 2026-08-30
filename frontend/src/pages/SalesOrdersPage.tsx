@@ -186,7 +186,7 @@ export function SalesOrdersPage() {
 
       {showForm && (
         <form onSubmit={handleCreate} className="mb-6 space-y-4 rounded-lg border border-gray-200 bg-white p-4">
-          {formError && <div className="text-sm text-red-600">{formError}</div>}
+          {formError && <div role="alert" className="text-sm text-red-600">{formError}</div>}
           <div className="grid grid-cols-3 gap-4">
             <div>
               <label htmlFor={`${fieldId}-customerId`} className="block text-sm font-medium text-gray-700">Customer (optional)</label>
@@ -272,7 +272,7 @@ export function SalesOrdersPage() {
         </form>
       )}
 
-      {rowError && <div className="mb-4 text-sm text-red-600">{rowError}</div>}
+      {rowError && <div role="alert" className="mb-4 text-sm text-red-600">{rowError}</div>}
 
       <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
         <table className="min-w-full divide-y divide-gray-200 text-sm">
@@ -289,7 +289,7 @@ export function SalesOrdersPage() {
               <tr><td colSpan={4} className="px-4 py-6 text-center text-gray-500">Loading...</td></tr>
             )}
             {ordersQuery.isError && (
-              <tr><td colSpan={4} className="px-4 py-6 text-center text-red-600">Failed to load sales orders.</td></tr>
+              <tr><td colSpan={4} role="alert" className="px-4 py-6 text-center text-red-600">Failed to load sales orders.</td></tr>
             )}
             {ordersQuery.data?.items.length === 0 && (
               <tr><td colSpan={4} className="px-4 py-6 text-center text-gray-500">No sales orders yet.</td></tr>

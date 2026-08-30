@@ -45,7 +45,7 @@ export function ResetPasswordPage() {
         </h1>
 
         {!token ? (
-          <p className="text-sm text-red-600">
+          <p role="alert" className="text-sm text-red-600">
             {isInvite
               ? "This invite link is missing its token. Ask whoever invited you to send a new one."
               : (
@@ -57,7 +57,7 @@ export function ResetPasswordPage() {
           </p>
         ) : (
           <form onSubmit={handleSubmit}>
-            {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
+            {error && <div role="alert" className="mb-4 text-sm text-red-600">{error}</div>}
 
             <label htmlFor={`${fieldId}-newPassword`} className="block text-sm font-medium text-gray-700">New password</label>
             <input

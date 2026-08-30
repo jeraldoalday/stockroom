@@ -213,7 +213,7 @@ export function ProductsPage() {
         </div>
       </div>
 
-      {importError && <div className="mb-4 text-sm text-red-600">{importError}</div>}
+      {importError && <div role="alert" className="mb-4 text-sm text-red-600">{importError}</div>}
       {importResult && (
         <div className="mb-4 rounded-md border border-gray-200 bg-white p-3 text-sm">
           <div className="text-gray-700">
@@ -221,7 +221,7 @@ export function ProductsPage() {
             {importResult.errors.length > 0 ? `, ${importResult.errors.length} row(s) skipped` : ""}.
           </div>
           {importResult.errors.length > 0 && (
-            <ul className="mt-2 list-disc pl-5 text-red-600">
+            <ul role="alert" className="mt-2 list-disc pl-5 text-red-600">
               {importResult.errors.map((err) => (
                 <li key={err.row}>Row {err.row}: {err.message}</li>
               ))}
@@ -241,7 +241,7 @@ export function ProductsPage() {
           <div className="col-span-2 text-sm font-medium text-gray-900">
             {editing ? `Edit ${editing.sku}` : "New product"}
           </div>
-          {formError && <div className="col-span-2 text-sm text-red-600">{formError}</div>}
+          {formError && <div role="alert" className="col-span-2 text-sm text-red-600">{formError}</div>}
           <div>
             <label htmlFor={`${fieldId}-sku`} className="block text-sm font-medium text-gray-700">SKU</label>
             <input
@@ -293,7 +293,7 @@ export function ProductsPage() {
                 Add
               </button>
             </div>
-            {categoryError && <div className="mt-1 text-xs text-red-600">{categoryError}</div>}
+            {categoryError && <div role="alert" className="mt-1 text-xs text-red-600">{categoryError}</div>}
           </div>
           <div>
             <label htmlFor={`${fieldId}-price`} className="block text-sm font-medium text-gray-700">Price ($)</label>
@@ -355,7 +355,7 @@ export function ProductsPage() {
         </form>
       )}
 
-      {rowError && <div className="mb-4 text-sm text-red-600">{rowError}</div>}
+      {rowError && <div role="alert" className="mb-4 text-sm text-red-600">{rowError}</div>}
 
       <div className="mb-4 flex gap-1 rounded-md border border-gray-200 bg-white p-1 w-fit">
         {STATUS_TABS.map((tab) => (
@@ -402,7 +402,7 @@ export function ProductsPage() {
             )}
             {productsQuery.isError && (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-red-600">Failed to load products.</td>
+                <td colSpan={6} role="alert" className="px-4 py-6 text-center text-red-600">Failed to load products.</td>
               </tr>
             )}
             {productsQuery.data?.items.length === 0 && (

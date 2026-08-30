@@ -58,7 +58,7 @@ export function InventoryPage() {
             )}
             {inventoryQuery.isError && (
               <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-red-600">Failed to load inventory.</td>
+                <td colSpan={4} role="alert" className="px-4 py-6 text-center text-red-600">Failed to load inventory.</td>
               </tr>
             )}
             {inventoryQuery.data?.items.length === 0 && (

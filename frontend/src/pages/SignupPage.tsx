@@ -38,7 +38,7 @@ export function SignupPage() {
       <form onSubmit={handleSubmit} className="w-full max-w-sm bg-white p-8 rounded-lg shadow">
         <h1 className="text-xl font-semibold text-brand-700 mb-6">Create your StockRoom account</h1>
 
-        {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
+        {error && <div role="alert" className="mb-4 text-sm text-red-600">{error}</div>}
 
         <label htmlFor={`${fieldId}-businessName`} className="block text-sm font-medium text-gray-700">Business name</label>
         <input

@@ -179,7 +179,7 @@ export function DashboardPage() {
                 <tr key={mover.productId}>
                   <td className="px-4 py-2">
                     {mover.name}
-                    <span className="ml-2 font-mono text-xs text-gray-400">{mover.sku}</span>
+                    <span className="ml-2 font-mono text-xs text-gray-500">{mover.sku}</span>
                     {!mover.isActive && (
                       <span className="ml-2 rounded-full bg-gray-200 px-2 py-0.5 text-xs font-medium text-gray-600">
                         Archived

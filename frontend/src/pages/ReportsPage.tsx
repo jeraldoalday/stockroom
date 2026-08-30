@@ -155,7 +155,7 @@ export function ReportsPage() {
                 {reorderQuery.data.items.map((item) => (
                   <tr key={item.productId} className="border-t border-gray-100">
                     <td className="py-1.5 pr-4 text-gray-900">
-                      {item.name} <span className="text-gray-400">({item.sku})</span>
+                      {item.name} <span className="text-gray-500">({item.sku})</span>
                     </td>
                     <td className="py-1.5 pr-4 text-gray-700">{item.currentStock}</td>
                     <td className="py-1.5 pr-4 text-gray-700">{item.avgDailyDemand}</td>
@@ -230,7 +230,7 @@ export function ReportsPage() {
                     {deadStockQuery.data.items.map((item) => (
                       <tr key={item.productId} className="border-t border-gray-100">
                         <td className="py-1.5 pr-4 text-gray-900">
-                          {item.name} <span className="text-gray-400">({item.sku})</span>
+                          {item.name} <span className="text-gray-500">({item.sku})</span>
                         </td>
                         <td className="py-1.5 pr-4 text-gray-700">{item.quantityOnHand}</td>
                         <td className="py-1.5 pr-4 font-medium text-gray-900">

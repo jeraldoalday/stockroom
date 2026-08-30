@@ -161,7 +161,7 @@ export function TeamPage() {
                 <tr key={member.id}>
                   <td className="px-4 py-2">
                     {member.name}
-                    {isSelf && <span className="ml-1 text-xs text-gray-400">(you)</span>}
+                    {isSelf && <span className="ml-1 text-xs text-gray-500">(you)</span>}
                   </td>
                   <td className="px-4 py-2 text-gray-500">{member.email}</td>
                   <td className="px-4 py-2">{member.role === "OWNER" ? "Owner" : "Staff"}</td>

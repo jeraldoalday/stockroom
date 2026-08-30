@@ -211,7 +211,7 @@ export function StockMovementsPage() {
           {movementType === "SALE" && (
             <div className="col-span-2">
               <label htmlFor={`${fieldId}-unitPrice`} className="block text-sm font-medium text-gray-700">
-                Unit price ($) <span className="text-gray-400">(optional)</span>
+                Unit price ($) <span className="text-gray-500">(optional)</span>
               </label>
               <input
                 id={`${fieldId}-unitPrice`}

@@ -2131,3 +2131,122 @@ exercised through Vitest's jsdom environment.
 **Blockers/decisions carried forward:**
 
 - None new.
+
+## Day 26 (post-MVP) — 2026-08-30
+
+**Found the same detached-HEAD/stale-branch pattern as Day 24 and Day 20:**
+`origin/main` (Day 24's commit) was three commits behind the local
+detached HEAD (Day 25's three page-suite commits, never pushed). Re-verified
+the tree against all three build/test commands before resetting local `main`
+onto it and pushing — same reasoning as those two prior entries: a session
+that never got to push also never had its final state confirmed clean by
+anyone downstream.
+
+**Planned:** Item 1 on the Day 25 list — page-level suites for the last four
+untested pages (CategoriesPage, InventoryPage, TeamPage, AccountPage) — then
+the accessibility items carried since Day 23 (`aria-live` on error banners,
+colour contrast, table semantics), since closing out frontend test coverage
+made "is this page's behavior actually covered before I touch its markup"
+a much cheaper question to answer for the rest of the day's work.
+
+**Shipped — the last four page-level test suites (60 tests):**
+
+- **InventoryPage** (8 tests): read-only, so the smallest suite — the
+  location filter, the table's three states, and pagination.
+- **CategoriesPage** (18 tests): follows the LocationsPage template (a bare
+  array, no pagination control) but earns its own suite for inline rename,
+  the one action neither Locations nor Customers has.
+- **TeamPage** (19 tests): the Owner-only invite/role/unlock/remove actions,
+  and the self-row exceptions (no self-remove, no self-unlock, the "(you)"
+  tag) — the first page in this suite where the signed-in user's own name
+  legitimately appears twice (sidebar footer + their own table row), which
+  broke several `findByText("Dana Owner")` anchors by resolving instantly
+  against the sidebar before the table ever loaded. Fixed by anchoring on
+  data that's genuinely table-only ("(you)", a colleague's name) instead of
+  anything that also names the signed-in user.
+- **AccountPage** (15 tests): the change-password flow, including the
+  delayed sign-out on success — exercised with a real 2.5s timer rather than
+  a mocked clock, since `userEvent`'s own internals use real timers and
+  faking the clock here would mean fighting that rather than testing the
+  page. Also covers the per-session end/sign-out actions. `logout()` (fired
+  after a password change, and when ending the browser's own session) calls
+  `revokeSessionOnServer`, which goes through a bare `axios.post` rather than
+  `apiClient` — outside what `MockApi`'s adapter swap can see — so it needed
+  its own `vi.spyOn`, the same way `AuthContext.test.tsx` already handles it.
+  The confirm dialog's label is identical to its trigger button's label for
+  a non-current session ("End session") and for the current one ("Sign
+  out"), so those clicks needed scoping into the dialog with `within` to
+  stay unambiguous.
+
+Every frontend page now has a test suite; 338 tests total (up from 278).
+
+**Shipped — the rest of the Day 23-25 accessibility carry-forward list:**
+
+- **`aria-live` on every dynamic message** (~50 spots across every page):
+  `role="alert"` on error banners, validation messages, and "Failed to load
+  X." states; `role="status"` on success confirmations (password reset,
+  invite accepted, a cleared lockout). Previously the text was there but a
+  screen reader had no signal that it had just appeared — Day 23's own
+  example, "no announcement when an archive is rejected," is now fixed
+  along with every sibling case of the same gap.
+- **Found and fixed a real gap while doing that pass, not just markup:**
+  `DashboardPage`'s low-stock panel had no `isError` branch at all — a
+  failed load rendered nothing, indistinguishable from "nothing is low on
+  stock." Added the missing error state (matching the top-movers panel next
+  to it) plus a regression test.
+- **`scope="col"` on every `<th>`** (74 cells across 13 tables) — mechanical
+  and uniform, since every table here has exactly one row of column headers
+  and no row headers. Without it, a screen reader reading a data cell has no
+  association back to its column.
+- **Colour contrast:** computed actual relative-luminance contrast ratios
+  (not just eyeballed hex codes) for every text/background pair the app
+  uses. `text-gray-500`, `text-brand-600`, `text-red-600`, and
+  `text-green-700` all already clear WCAG AA's 4.5:1 against white — the
+  values already in use were chosen well. `text-gray-400` was the one real
+  failure, at ~2.5:1: it was used for SKU tags next to product names
+  (Dashboard top movers, Reports), the stock-movement form's "(optional)"
+  hint, and TeamPage's "(you)" tag. Switched all five to `text-gray-500`,
+  already the app's standard secondary-text color everywhere else.
+
+**Verified beyond the build/test commands:** this sandbox had both
+`pg_ctlcluster`-managed Postgres and the pre-installed Chromium available, so
+the accessibility and contrast fixes were checked outside jsdom rather than
+assumed correct from the diff — created the `stockroom` role/db from
+scratch, ran `prisma migrate deploy` and `npm run seed`, started the backend
+and frontend, and drove Chromium (global `playwright`, since it isn't a
+project dependency) via a scratch script rather than screenshots alone:
+confirmed `TeamPage`'s `<th>` elements report `getAttribute("scope") ===
+"col"` in a real DOM, that a triggered invite-conflict error actually
+renders inside a `[role="alert"]` element, and that the "(you)" span's
+`getComputedStyle(...).color` reads back as `rgb(107, 114, 128)` — exactly
+`gray-500` — confirming the contrast fix rendered, not just compiled.
+Screenshots of the Dashboard, Team, and Reports pages confirmed no layout
+regression from any of the three markup passes.
+
+**Verified (all three services):** frontend `npm run lint`, `npm test`
+(339/339, up from 278), `npm run build` (type-checks the tests too); backend
+`npx tsc --noEmit`, full Jest suite (320/320, unchanged — no backend file
+touched this session); python-service `python3 -m pytest -q` (44/44,
+likewise unchanged). All clean.
+
+**Next:**
+
+1. Both standing carry-forward lists (frontend page coverage, and the Day 23
+   accessibility pass) are now fully closed. What's left is the older,
+   smaller infrastructure list from Day 21-23: revocable access tokens
+   (bearer-only, 15-minute exposure window after any revocation), and moving
+   the token/rate-limit prune sweeps off the in-process timer onto the
+   documented cron path for a real multi-instance deploy.
+2. No fresh gaps surfaced this session worth adding to the list — the one
+   found (`DashboardPage`'s missing low-stock error state) was fixed inline
+   rather than deferred.
+
+**Blockers/decisions carried forward:**
+
+- None new. The detached-HEAD/stale-branch state at the start of this
+  session was container-setup residue, not a decision — same as Day 20 and
+  Day 24's entries, recorded here in case a future session hits it again
+  and wonders whether it means lost work. It does not: `origin/main` is the
+  source of truth, and any session finding local `main` behind it should
+  re-verify the ahead commits and push before starting new work, exactly as
+  this and those two prior sessions did.

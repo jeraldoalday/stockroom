@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 import { Prisma } from "@prisma/client";
 import { ZodError } from "zod";
 import { ApiError } from "../lib/errors";
+import { logger } from "../lib/logger";
 
 export function notFoundHandler(_req: Request, res: Response) {
   res.status(404).json({ error: "Route not found" });
@@ -33,9 +34,25 @@ function translatePrismaError(err: Prisma.PrismaClientKnownRequestError): ApiErr
   }
 }
 
+// Logs an unexpected failure with everything needed to find it again: the
+// request id (also echoed on the response's X-Request-Id header, so a
+// client-side error report or a support ticket can be matched back to this
+// exact line), which route it was, and the stack. Client errors (bad input,
+// a missing record, an expired token) are not logged here — `requestLogger`
+// already writes a line for every request with its status code, and a 4xx
+// is an expected outcome, not an incident to page anyone about.
+function logUnexpected(err: unknown, req: Request) {
+  logger.error("unhandled error", {
+    requestId: req.id,
+    method: req.method,
+    path: req.originalUrl,
+    error: err instanceof Error ? { name: err.name, message: err.message, stack: err.stack } : err,
+  });
+}
+
 // Express identifies an error handler by its four-parameter signature, so
 // `_next` must stay in the list even though nothing calls it.
-export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction) {
+export function errorHandler(err: unknown, req: Request, res: Response, _next: NextFunction) {
   if (err instanceof ZodError) {
     return res.status(400).json({ error: "Validation failed", details: err.flatten() });
   }
@@ -54,10 +71,10 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
   if (err instanceof Prisma.PrismaClientValidationError) {
     // A malformed query is our bug, not the caller's — log it in full but
     // don't echo the query back, since it names internal columns.
-    console.error(err);
+    logUnexpected(err, req);
     return res.status(500).json({ error: "Internal server error" });
   }
 
-  console.error(err);
+  logUnexpected(err, req);
   return res.status(500).json({ error: "Internal server error" });
 }

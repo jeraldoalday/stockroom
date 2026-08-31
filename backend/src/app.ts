@@ -2,6 +2,8 @@ import express from "express";
 import cors from "cors";
 import { env } from "./lib/env";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
+import { requestId } from "./middleware/requestId";
+import { requestLogger } from "./middleware/requestLogger";
 import authRoutes from "./routes/auth.routes";
 import categoriesRoutes from "./routes/categories.routes";
 import productsRoutes from "./routes/products.routes";
@@ -18,6 +20,11 @@ import usersRoutes from "./routes/users.routes";
 
 export function createApp() {
   const app = express();
+
+  // First, so every later middleware, route handler and log line can carry
+  // req.id — including a request that CORS or JSON parsing itself rejects.
+  app.use(requestId);
+  app.use(requestLogger);
 
   app.use(cors({ origin: env.corsOrigin }));
   app.use(express.json());

@@ -232,9 +232,20 @@ add a second instance.
   counter. No known limitation left here; keeping this line only long enough
   to note it moved off the per-process list a session after the one above
   described it.
-- **No structured logging, metrics or error reporting.** Errors go to
-  `console.error` and unhandled 500s carry no request id, so a production
-  failure is only diagnosable if you happen to be tailing the logs.
+- ~~**No structured logging, and unhandled 500s carry no request id.**~~
+  **Partially resolved:** every request now carries an id
+  (`middleware/requestId.ts`) echoed on the `X-Request-Id` response
+  header, and `middleware/requestLogger.ts` writes one JSON-lines log per
+  request (method, path, status, duration, org/user when authenticated) via
+  `lib/logger.ts`. Unhandled errors log the same request id plus the
+  stack, so a customer-reported failure (they hand support the id off their
+  own network tab or an error toast) can be grepped straight to its server
+  log line instead of only being catchable by whoever happened to be
+  tailing `console.error` at the time. Still no metrics or external error
+  reporting (Sentry or similar) — these lines go to stdout, which is fine
+  for a platform that captures process output (Railway, most PaaS targets)
+  and nowhere on its own if you're running bare `node` with nothing
+  collecting it.
 - **No backups configured.** The `docker-compose.yml` in this repository is
   for local development: its Postgres has no backup, no WAL archiving and
   default credentials. Use a managed database in production.

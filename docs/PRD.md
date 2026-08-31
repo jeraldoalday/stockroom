@@ -79,11 +79,23 @@ by `organizationId` at the middleware layer, never trusted from the client.
 | F11 | Basic sales/stock report (Python service) with 7/30-day trend | P1 | Shipped (day 11) |
 | F12 | Simple reorder-quantity suggestion (moving-average demand) | P2 | Shipped (day 12) |
 | F13 | Dead-stock report: products holding stock that isn't selling, valued at cost | P2 | Shipped (day 18) |
+| F14 | Low-stock email digest: daily push to Owners, not just the dashboard pull | P2 | Shipped (day 27) |
 
 All twelve MVP requirements are implemented end to end (API, UI, and tests);
-F13 is a post-v1 addition rather than part of that scope. "Top movers"
+F13-F14 are post-v1 additions rather than part of that scope. "Top movers"
 appears in section 3, goal 5 but was missing from the F9 row above until
 day 14; the row now reflects what F9 was always meant to include.
+
+F14 is the push half of goal 3 ("alert on low stock before it becomes a
+stockout"): F8's dashboard list only ever helped an Owner who thought to go
+look. `npm run digest:low-stock` (`backend/src/lib/lowStockDigest.ts`)
+emails every Owner in an organization once it has a product at or below its
+reorder point — meant to run once a day from cron, the same way
+`prune:tokens` does (see `docs/DEPLOYMENT.md`). No per-user opt-out and no
+de-duplication across days by design: a daily digest that always reports
+what's currently low is simple to reason about, and cron's own schedule is
+what keeps it to once a day rather than the app tracking "was this already
+reported" state.
 
 ## 7. Non-functional requirements
 

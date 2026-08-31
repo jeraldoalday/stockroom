@@ -15,6 +15,7 @@
     "seed": "tsx prisma/seed.ts",
     "prisma:seed": "tsx prisma/seed.ts",
     "prune:tokens": "tsx src/scripts/pruneTokens.ts",
+    "digest:low-stock": "tsx src/scripts/lowStockDigest.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.seed.json"
   },
   "dependencies": {

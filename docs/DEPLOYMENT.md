@@ -140,7 +140,76 @@ Order matters on the first deploy, and on any deploy carrying a migration:
   returns HTTP 200. A platform that only looks at the status code will
   consider a database-less reports service healthy. Check the body.
 
-## 6. Known limitations before you scale out
+## 6. Scheduled jobs
+
+Two jobs are meant to run on a schedule rather than inside the API
+process — see the matching bullet under §7 for why each one specifically
+isn't a request handler or an in-process timer.
+
+- **`npm run prune:tokens`** — hourly. Deletes expired refresh,
+  password-reset, and rate-limit-bucket rows.
+- **`npm run digest:low-stock`** — daily. Emails every Owner in an
+  organization once it has a product at or below its reorder point
+  (`backend/src/lib/lowStockDigest.ts`). Unlike the prune sweep this one is
+  never meant to run on an in-process timer at all, even with a single
+  instance — see its own bullet under §7.
+
+Both exit non-zero on failure and print a one-line summary on success, so
+cron's own mail-on-error (or systemd's failed-unit state) notices a job
+that stopped working instead of it failing silently forever.
+
+```
+# crontab -e, on any one host that can reach the database — the app
+# server itself, or a small ops/jump box.
+0 * * * * cd /opt/stockroom/backend && /usr/bin/npm run prune:tokens >> /var/log/stockroom-prune.log 2>&1
+0 8 * * * cd /opt/stockroom/backend && /usr/bin/npm run digest:low-stock >> /var/log/stockroom-digest.log 2>&1
+```
+
+Or as systemd service + timer pairs, if the platform manages services that
+way — this is `stockroom-prune`; `stockroom-digest` is identical but for
+`digest:low-stock` and an `OnCalendar=*-*-* 08:00:00` timer instead of
+`hourly`:
+
+```ini
+# /etc/systemd/system/stockroom-prune.service
+[Unit]
+Description=StockRoom expired token/rate-limit sweep
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/stockroom/backend
+EnvironmentFile=/opt/stockroom/backend/.env
+ExecStart=/usr/bin/npm run prune:tokens
+```
+
+```ini
+# /etc/systemd/system/stockroom-prune.timer
+[Unit]
+Description=Run stockroom-prune.service hourly
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Enable with `systemctl enable --now stockroom-prune.timer` (and the
+`-digest` equivalent).
+
+Running either job twice in the same window is safe: `deleteMany` on an
+already-deleted row is a no-op, and the digest sending twice just means an
+Owner gets the same email twice — annoying, not wrong, since nothing
+tracks "already reported" state. That's deliberate: a daily digest that
+always reports what's currently low is simple to reason about, and it's
+cron's own schedule that keeps it to once a day rather than the app having
+to track state to avoid repeating itself. A misconfigured schedule that
+runs the digest every few minutes instead of daily is the one way to turn
+"annoying" into "actually spammy," so double check the cron expression
+against the table above before enabling it.
+
+## 7. Known limitations before you scale out
 
 These are real and currently unaddressed. They are listed here rather than
 in an issue tracker because each one silently changes behaviour when you
@@ -160,53 +229,18 @@ add a second instance.
   sweeping is harmless (`deleteMany` on an already-deleted row is a no-op)
   but redundant, so set `TOKEN_PRUNE_INTERVAL_MS=0` on every instance —
   which turns the in-process timer off entirely — and run the same sweep
-  once for the whole deployment via cron instead:
-
-  ```
-  # crontab -e, on any one host that can reach the database — the app
-  # server itself, or a small ops/jump box. Runs hourly, matching the
-  # in-process default.
-  0 * * * * cd /opt/stockroom/backend && /usr/bin/npm run prune:tokens >> /var/log/stockroom-prune.log 2>&1
-  ```
-
-  Or as a systemd service + timer pair, if the platform manages services
-  that way:
-
-  ```ini
-  # /etc/systemd/system/stockroom-prune.service
-  [Unit]
-  Description=StockRoom expired token/rate-limit sweep
-
-  [Service]
-  Type=oneshot
-  WorkingDirectory=/opt/stockroom/backend
-  EnvironmentFile=/opt/stockroom/backend/.env
-  ExecStart=/usr/bin/npm run prune:tokens
-  ```
-
-  ```ini
-  # /etc/systemd/system/stockroom-prune.timer
-  [Unit]
-  Description=Run stockroom-prune.service hourly
-
-  [Timer]
-  OnCalendar=hourly
-  Persistent=true
-
-  [Install]
-  WantedBy=timers.target
-  ```
-
-  Enable with `systemctl enable --now stockroom-prune.timer`. Either way,
-  `npm run prune:tokens` exits non-zero on failure (`src/scripts/
-  pruneTokens.ts`), so cron's own mail-on-error or systemd's failed-unit
-  state notices a sweep that stopped working instead of the tables quietly
-  growing forever.
-
+  once for the whole deployment via cron instead. See §6 for the recipe.
   Note what the sweep deliberately keeps regardless of how it's run: a
   revoked refresh token that has not yet expired is the reuse detector, and
   deleting those early would turn a replayed token into an ordinary 401
   with the rest of the attacker's family still working.
+- **The low-stock digest has no in-process timer at all, on purpose.**
+  Unlike token pruning — housekeeping, harmless to run redundantly, safe as
+  a default-on in-process timer — `npm run digest:low-stock` sends email to
+  customers. Two API instances each running it on their own timer would
+  double-email every Owner, and "how often" is a product decision (daily),
+  not an infrastructure one, so this only ever runs from an explicit
+  schedule someone set up on purpose. See §6.
 - **No email provider configured by default.** `EmailSender` (`lib/email.ts`)
   has a real SMTP implementation now, used automatically once `SMTP_HOST` is
   set (see the env var table above) — works with any provider that speaks
@@ -250,7 +284,7 @@ add a second instance.
   for local development: its Postgres has no backup, no WAL archiving and
   default credentials. Use a managed database in production.
 
-## 7. Local production-like run
+## 8. Local production-like run
 
 To check a build the way it will actually run, rather than through the Vite
 dev server:
@@ -278,7 +312,7 @@ otherwise the preview server's requests are blocked by CORS — which is the
 same class of misconfiguration as pointing a real deployment at the wrong
 origin, and worth seeing once locally.
 
-## 8. Deploying to Railway
+## 9. Deploying to Railway
 
 Day 14 deliverable (PRD §11). Resolves the hosting-target open question from
 PRD §12: **Railway** for the MVP demo. Rationale: three independent
@@ -366,7 +400,7 @@ is degraded-but-safe, not broken.
   default; add an explicit rewrite rule if not, since React Router owns
   client-side routes like `/products` that don't exist as files).
 
-## 9. First-boot checklist
+## 10. First-boot checklist
 
 After all three services are up:
 
@@ -387,7 +421,7 @@ After all three services are up:
    database: it writes fake products and 60 days of fake movements into
    whatever it can reach.
 
-## 10. Rollback
+## 11. Rollback
 
 Railway (and Render/Fly) keep prior deploys; redeploying an older build is
 a dashboard action, no extra tooling needed. The one stateful risk is a

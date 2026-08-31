@@ -35,7 +35,7 @@ as the database.
 | `JWT_REFRESH_SECRET` | yes | **Must differ from the access secret.** They are separate keys so that a leaked access secret can't be used to mint 7-day refresh tokens. |
 | `JWT_ACCESS_TTL` | no (`15m`) | Short by design; the frontend refreshes transparently. |
 | `JWT_REFRESH_TTL` | no (`7d`) | How long a signed-out-of-nowhere session lasts. |
-| `TOKEN_PRUNE_INTERVAL_MS` | no (`3600000`) | How often the API sweeps expired refresh and reset token rows. Per process, so with more than one instance run `npm run prune:tokens` from cron instead. |
+| `TOKEN_PRUNE_INTERVAL_MS` | no (`3600000`) | How often the API sweeps expired refresh and reset token rows. Per process, so with more than one instance set this to `0` on every instance (disables the in-process sweep) and run `npm run prune:tokens` from cron instead — see §6 for a copy-paste recipe. |
 | `PORT` | no (`4000`) | |
 | `CORS_ORIGIN` | yes in production | The exact frontend origin. The default is `http://localhost:5173`; leaving it there in production means the browser blocks every request. |
 | `PYTHON_SERVICE_URL` | yes | Private address of the reports service. |
@@ -146,24 +146,67 @@ These are real and currently unaddressed. They are listed here rather than
 in an issue tracker because each one silently changes behaviour when you
 add a second instance.
 
-- **Access tokens are not revocable.** Refresh tokens now are: they rotate
-  on every use, are recorded server-side by hash, and are revoked by signing
-  out or by any password change, with a replayed token burning its whole
-  rotation family. Access tokens remain plain bearer tokens with no
-  server-side check, so a revocation takes up to `JWT_ACCESS_TTL` (15
-  minutes by default) to be fully effective. That window is the reason to
-  keep the TTL short; shortening it further trades refresh traffic for a
-  smaller exposure.
-- **Token and rate-limit pruning is per-process.** Expired refresh,
-  password-reset, and rate-limit-bucket rows are deleted on a timer inside
-  each API process (`TOKEN_PRUNE_INTERVAL_MS`), so two instances both
-  sweep — harmless (`deleteMany` on an already-deleted row is a no-op), but
-  redundant work. Behind a load balancer, set the interval high or disable
-  it and run `npm run prune:tokens` from cron instead. Note what the sweep
-  deliberately keeps: a revoked refresh token that has not yet expired is
-  the reuse detector, and deleting those early would turn a replayed token
-  into an ordinary 401 with the rest of the attacker's family still
-  working.
+- ~~**Access tokens are not revocable.**~~ **Resolved:** `requireAuth`
+  checks the session (refresh-token family) an access token was minted from
+  on every request (`isFamilyLive()` in `lib/refreshTokens.ts`), at the cost
+  of one extra indexed read per authenticated request. Signing out, ending
+  a specific session, or a password change now invalidates that session's
+  access tokens immediately rather than leaving them valid for up to
+  `JWT_ACCESS_TTL`.
+- **Token and rate-limit pruning is per-process by default.** Expired
+  refresh, password-reset, and rate-limit-bucket rows are deleted on a
+  timer inside each API process (`TOKEN_PRUNE_INTERVAL_MS`, default hourly).
+  With one instance this is fine. With more than one, every instance
+  sweeping is harmless (`deleteMany` on an already-deleted row is a no-op)
+  but redundant, so set `TOKEN_PRUNE_INTERVAL_MS=0` on every instance —
+  which turns the in-process timer off entirely — and run the same sweep
+  once for the whole deployment via cron instead:
+
+  ```
+  # crontab -e, on any one host that can reach the database — the app
+  # server itself, or a small ops/jump box. Runs hourly, matching the
+  # in-process default.
+  0 * * * * cd /opt/stockroom/backend && /usr/bin/npm run prune:tokens >> /var/log/stockroom-prune.log 2>&1
+  ```
+
+  Or as a systemd service + timer pair, if the platform manages services
+  that way:
+
+  ```ini
+  # /etc/systemd/system/stockroom-prune.service
+  [Unit]
+  Description=StockRoom expired token/rate-limit sweep
+
+  [Service]
+  Type=oneshot
+  WorkingDirectory=/opt/stockroom/backend
+  EnvironmentFile=/opt/stockroom/backend/.env
+  ExecStart=/usr/bin/npm run prune:tokens
+  ```
+
+  ```ini
+  # /etc/systemd/system/stockroom-prune.timer
+  [Unit]
+  Description=Run stockroom-prune.service hourly
+
+  [Timer]
+  OnCalendar=hourly
+  Persistent=true
+
+  [Install]
+  WantedBy=timers.target
+  ```
+
+  Enable with `systemctl enable --now stockroom-prune.timer`. Either way,
+  `npm run prune:tokens` exits non-zero on failure (`src/scripts/
+  pruneTokens.ts`), so cron's own mail-on-error or systemd's failed-unit
+  state notices a sweep that stopped working instead of the tables quietly
+  growing forever.
+
+  Note what the sweep deliberately keeps regardless of how it's run: a
+  revoked refresh token that has not yet expired is the reuse detector, and
+  deleting those early would turn a replayed token into an ordinary 401
+  with the rest of the attacker's family still working.
 - **No email provider configured by default.** `EmailSender` (`lib/email.ts`)
   has a real SMTP implementation now, used automatically once `SMTP_HOST` is
   set (see the env var table above) — works with any provider that speaks

@@ -196,9 +196,15 @@ blocking for a design-partner pilot:
   carries a `/reset-password` link the member uses to set their own.
 - ~~**Refresh tokens cannot be revoked.**~~ **Resolved (Day 17):** refresh
   tokens rotate on use, are recorded server-side, and are revoked by
-  signing out or by any password change. Access tokens are still bearer
-  tokens with a 15-minute life and no server-side check, so a revocation
-  takes up to that long to be complete.
+  signing out or by any password change.
+- ~~**Access tokens are bearer-only, so a revocation takes up to 15 minutes
+  to be complete.**~~ **Resolved (Day 27):** `requireAuth` now checks the
+  session (refresh-token family) an access token was minted from on every
+  request, via `isFamilyLive()`. Signing out, ending a specific session, or
+  a password change now invalidates that session's access tokens
+  immediately instead of leaving them valid for the rest of their 15
+  minutes. Costs one extra indexed read per authenticated request — the
+  same shared-Postgres-state trade-off already made for rate limiting.
 - ~~**Rate limiting is per-process**, so it weakens as soon as there is more
   than one API instance.~~ **Resolved (Day 21):** the login, signup,
   forgot-password and reset-password limiters keep their counters in a

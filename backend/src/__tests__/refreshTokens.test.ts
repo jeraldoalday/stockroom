@@ -5,7 +5,7 @@ jest.mock("../lib/prisma");
 import { prisma } from "../lib/prisma";
 import { resetPrismaMock } from "./testUtils/prismaMock";
 import { createApp } from "../app";
-import { hashRefreshToken } from "../lib/refreshTokens";
+import { hashRefreshToken, isFamilyLive } from "../lib/refreshTokens";
 
 const app = createApp();
 
@@ -203,6 +203,34 @@ describe("Signing out", () => {
 
     expect((await refresh(other.body.refreshToken)).status).toBe(200);
   });
+
+  // Signing out used to only stop the refresh token from working — the
+  // access token minted alongside it kept authenticating requests for up to
+  // its own 15-minute life, since nothing on the request path checked the
+  // database. requireAuth now consults the session behind every access
+  // token, so this takes effect immediately instead of on a delay.
+  it("also rejects the access token minted for that session, immediately", async () => {
+    const { refreshToken, accessToken } = await signUp();
+
+    await request(app).post("/api/auth/logout").send({ refreshToken });
+
+    const res = await request(app)
+      .get("/api/auth/sessions")
+      .set("Authorization", `Bearer ${accessToken}`);
+    expect(res.status).toBe(401);
+  });
+
+  it("leaves another device's access token working", async () => {
+    const first = await signUp();
+    const other = await login();
+
+    await request(app).post("/api/auth/logout").send({ refreshToken: other.body.refreshToken });
+
+    const res = await request(app)
+      .get("/api/auth/sessions")
+      .set("Authorization", `Bearer ${first.accessToken}`);
+    expect(res.status).toBe(200);
+  });
 });
 
 // The reason to change a password after a compromise is to stop whoever
@@ -254,5 +282,33 @@ describe("Password changes end every session", () => {
 
     // ...and the new password works.
     expect((await login("owner@shop.test", "brand-new-secret")).status).toBe(200);
+  });
+});
+
+describe("isFamilyLive", () => {
+  it("is true for a freshly issued session and false for an unknown one", async () => {
+    await signUp();
+    const [row] = await tokenRows();
+
+    expect(await isFamilyLive(row.familyId)).toBe(true);
+    expect(await isFamilyLive("no-such-family")).toBe(false);
+  });
+
+  it("goes false the moment the family is revoked", async () => {
+    const { refreshToken } = await signUp();
+    const [row] = await tokenRows();
+
+    await request(app).post("/api/auth/logout").send({ refreshToken });
+
+    expect(await isFamilyLive(row.familyId)).toBe(false);
+  });
+
+  it("stays true across a rotation — the family continues, it doesn't restart", async () => {
+    const { refreshToken } = await signUp();
+    const [before] = await tokenRows();
+
+    await refresh(refreshToken);
+
+    expect(await isFamilyLive(before.familyId)).toBe(true);
   });
 });

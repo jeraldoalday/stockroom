@@ -235,7 +235,7 @@ describe("DELETE /api/auth/sessions/:id", () => {
     expect(refreshed.status).toBe(200);
   });
 
-  it("leaves nothing to list after a password change ends everything", async () => {
+  it("rejects the access token itself once a password change ends every session", async () => {
     const { accessToken } = await signUp();
     await signIn();
 
@@ -245,9 +245,12 @@ describe("DELETE /api/auth/sessions/:id", () => {
       .send({ currentPassword: CREDENTIALS.password, newPassword: "brandnewpassword" });
     expect(changed.status).toBe(204);
 
-    // The access token outlives the sessions it was minted alongside, which
-    // is exactly why the page that shows this list signs the user out after
-    // a password change.
-    expect(await listSessions(accessToken)).toEqual([]);
+    // requireAuth checks the session behind every access token on every
+    // request, so a revocation takes effect immediately rather than only
+    // once that token's own 15 minutes run out.
+    const res = await request(app)
+      .get("/api/auth/sessions")
+      .set("Authorization", `Bearer ${accessToken}`);
+    expect(res.status).toBe(401);
   });
 });

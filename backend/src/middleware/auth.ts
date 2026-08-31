@@ -3,6 +3,7 @@ import type { UserRole } from "@prisma/client";
 import { verifyAccessToken } from "../lib/auth";
 import { ApiError } from "../lib/errors";
 import { redactForRole } from "../lib/rbac";
+import { isFamilyLive } from "../lib/refreshTokens";
 
 // Augment Express's Request with the authenticated principal. Every
 // tenant-scoped query in the app reads req.auth.organizationId — the
@@ -23,35 +24,54 @@ declare global {
   }
 }
 
-export function requireAuth(req: Request, res: Response, next: NextFunction) {
+export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const header = req.headers.authorization;
   if (!header?.startsWith("Bearer ")) {
     return next(ApiError.unauthorized("Missing bearer token"));
   }
 
   const token = header.slice("Bearer ".length);
+  let payload: ReturnType<typeof verifyAccessToken>;
   try {
-    const payload = verifyAccessToken(token);
-    req.auth = {
-      userId: payload.sub,
-      organizationId: payload.organizationId,
-      role: payload.role,
-      sessionId: payload.sessionId,
-    };
-
-    // Every authenticated JSON response is shaped in one place, regardless
-    // of which route produced it (see lib/rbac.ts): secret fields such as
-    // passwordHash are always stripped — they leak through Prisma relation
-    // includes without any route naming them — and cost/margin fields are
-    // additionally stripped for a STAFF principal.
-    const originalJson = res.json.bind(res);
-    const role = payload.role;
-    res.json = ((body: unknown) => originalJson(redactForRole(body, role))) as Response["json"];
-
-    next();
+    payload = verifyAccessToken(token);
   } catch {
-    next(ApiError.unauthorized("Invalid or expired token"));
+    return next(ApiError.unauthorized("Invalid or expired token"));
   }
+
+  // Confirms the session this token was minted from hasn't been revoked
+  // since — see isFamilyLive's own comment for why this is what makes a
+  // revocation take effect immediately rather than after up to 15 minutes.
+  // Absent only for a token minted before `sessionId` existed as a claim;
+  // those fall back to the old bearer-only trust, same as always.
+  if (payload.sessionId) {
+    let live: boolean;
+    try {
+      live = await isFamilyLive(payload.sessionId);
+    } catch (error) {
+      return next(error);
+    }
+    if (!live) {
+      return next(ApiError.unauthorized("This session has been revoked. Please sign in again."));
+    }
+  }
+
+  req.auth = {
+    userId: payload.sub,
+    organizationId: payload.organizationId,
+    role: payload.role,
+    sessionId: payload.sessionId,
+  };
+
+  // Every authenticated JSON response is shaped in one place, regardless
+  // of which route produced it (see lib/rbac.ts): secret fields such as
+  // passwordHash are always stripped — they leak through Prisma relation
+  // includes without any route naming them — and cost/margin fields are
+  // additionally stripped for a STAFF principal.
+  const originalJson = res.json.bind(res);
+  const role = payload.role;
+  res.json = ((body: unknown) => originalJson(redactForRole(body, role))) as Response["json"];
+
+  next();
 }
 
 export function requireRole(...roles: UserRole[]) {

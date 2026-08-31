@@ -173,6 +173,33 @@ export async function revokeSession(rawToken: string): Promise<void> {
   await revokeFamily(prisma, existing.familyId);
 }
 
+/**
+ * Whether a session (rotation family) is still live — has at least one
+ * unrevoked, unexpired refresh token row.
+ *
+ * This is what makes an *access* token revocable, not just the refresh
+ * token it was minted alongside. Before this, signing out (or a password
+ * change) only ever stopped the refresh token from working; the access
+ * token it had already handed out kept authenticating requests for up to
+ * its own 15-minute life regardless, since nothing on the request path
+ * consulted the database. `requireAuth` calls this on every authenticated
+ * request so a revocation takes effect immediately instead of on a delay.
+ *
+ * Deliberately reuses the refresh-token table's own rows rather than a
+ * separate "revoked sessions" list: `revokeFamily` marks every row in a
+ * family revoked at once, so "no live row left" and "this session was
+ * revoked" are the same fact, and `rotateRefreshToken`'s transaction always
+ * creates the replacement row before revoking the one it replaces — so a
+ * session mid-rotation never has a live-row gap for this to catch falsely.
+ */
+export async function isFamilyLive(familyId: string): Promise<boolean> {
+  const live = await prisma.refreshToken.findFirst({
+    where: { familyId, revokedAt: null, expiresAt: { gt: new Date() } },
+    select: { id: true },
+  });
+  return live !== null;
+}
+
 export interface SessionSummary {
   id: string;
   createdAt: Date;

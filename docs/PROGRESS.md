@@ -2250,3 +2250,116 @@ likewise unchanged). All clean.
   source of truth, and any session finding local `main` behind it should
   re-verify the ahead commits and push before starting new work, exactly as
   this and those two prior sessions did.
+
+## Day 27 (post-MVP) — 2026-08-31
+
+**Same container-setup pattern again at the start of this session, this
+time the milder form:** local `main` looked three commits behind
+`origin/main`'s cached ref, but a plain `git fetch origin main` showed the
+remote was already at Day 26's head — no unpushed work sitting anywhere,
+just a stale ref from the container's initial clone snapshot. Recorded here
+only because Day 24/26 both hit the more serious version of this (real
+unpushed commits) and a future session hitting either variant shouldn't
+have to rediscover that `git fetch` before anything else is the first move.
+
+**Planned:** the two infrastructure items carried since Day 21 — revocable
+access tokens, and moving the prune sweep off the in-process timer onto a
+real cron path — since the frontend and accessibility lists Day 26 closed
+had been the more urgent items keeping these two waiting.
+
+**Shipped — access tokens are now actually revocable:** `requireAuth`
+checks the session (refresh-token family) an access token was minted from
+on every request (`isFamilyLive()` in `lib/refreshTokens.ts`), not just at
+refresh time. Before this, signing out, ending a specific session, or a
+password change only ever stopped the *refresh* token — the access token
+already handed out kept authenticating requests for up to its own 15
+minutes, since nothing on the request path consulted the database.
+Reuses the `refresh_tokens` table rather than adding a new one: a family
+has a live row exactly when it hasn't been revoked, since `revokeFamily`
+marks every row in a family revoked at once and rotation always creates the
+replacement row before revoking the one it replaces, so there's no
+live-row gap mid-rotation for this to catch falsely. Costs one extra
+indexed read per authenticated request — accepted for the same reason the
+rate limiter already pays a Postgres round trip per hit. Verified against a
+real Postgres instance: logged in, called `/api/auth/sessions` (200), logged
+out, called it again with the same access token immediately after (401,
+"This session has been revoked"), not after waiting out the token's TTL.
+
+**Shipped — a real, runnable cron path for the prune sweep:**
+`TOKEN_PRUNE_INTERVAL_MS=0` now disables the in-process pruner cleanly
+(`server.ts`), instead of only being throttleable via a very large
+interval. Added a "Scheduled jobs" section to `docs/DEPLOYMENT.md` with a
+copy-paste crontab line and a systemd service+timer pair that call the
+already-existing `npm run prune:tokens` — the doc said "run it from cron
+instead" for several sessions running without ever showing what that
+crontab line looks like.
+
+**Shipped — request ids and structured logging:** every request now
+carries an id (`middleware/requestId.ts`, honouring a well-formed
+client-supplied `X-Request-Id` or minting one), echoed on the response
+header, and `middleware/requestLogger.ts` writes one JSON-lines log per
+request (method, path, status, duration, org/user once authenticated) via
+a small `lib/logger.ts`. `errorHandler` logs unhandled errors with the same
+id plus a stack trace. This was the last "not diagnosable in production"
+item left in `DEPLOYMENT.md`'s known-limitations list — a customer-reported
+failure can now be grepped straight to its server log line via the id off
+their network tab, instead of only being catchable by whoever happened to
+be tailing `console.error`. No new dependency: "structured" means
+JSON-lines to stdout, the same "use what's already in the stack" call this
+project already made for SMTP (nodemailer) and rate limiting (Postgres,
+not Redis). Request logging is skipped under `NODE_ENV=test` so the Jest
+suite doesn't gain a JSON line per request on top of the console noise
+`ConsoleEmailSender` already produces. Metrics and external error
+reporting (Sentry or similar) are still not there — noted as still-open in
+the doc rather than silently dropped.
+
+**Shipped — F14, a daily low-stock email digest for Owners:** PRD goal 3
+("alert on low stock before it becomes a stockout") only ever shipped as
+the dashboard's low-stock panel (F8) — something an Owner has to think to
+go check, not something that reaches them. `npm run digest:low-stock`
+(`lib/lowStockDigest.ts`) emails every Owner in an organization once it has
+a product at or below its reorder point, reusing `dashboardStats.ts`'s
+existing `fetchLowStockPage` query and the existing `EmailSender`
+abstraction (SMTP or console-log fallback, same as invites and password
+resets). Meant to run once daily from cron, not an in-process timer, for a
+different reason than the prune sweep's per-process-is-wasteful one: this
+sends email, so redundant instances would double-email every Owner, and
+"how often" is a product decision someone should set on purpose rather
+than an infrastructure default. No de-duplication or per-user opt-out —
+deliberately: a daily digest that always reports what's currently low is
+simple to reason about, and cron's own once-a-day schedule is what keeps
+it from repeating itself rather than the app tracking "already reported"
+state. Verified against a real Postgres instance end to end: signed up,
+created a product with a reorder point, received stock below it, ran the
+script, and confirmed the logged email's subject/body named the right
+SKU and quantities.
+
+**Verified:** backend `npx tsc --noEmit`, full Jest suite (346/346, up from
+320 — 26 new tests across the four features above), `eslint --max-warnings
+0`. All clean. Frontend and python-service untouched this session, so not
+re-run beyond what CI already covers on push.
+
+**Next:**
+
+1. `DEPLOYMENT.md`'s known-limitations list is down to: no metrics or
+   external error reporting (stdout logging now exists, but nothing
+   aggregates or alerts on it), no default email provider (operational, not
+   a code gap — SMTP just has to be configured), and no backups configured
+   (same, a hosting choice). None of these block a single-instance
+   deployment; the two-instance-specific gaps (access token revocation,
+   prune sweep scheduling) are the ones this session closed.
+2. The low-stock digest is backend-only — no frontend surface to review
+   what it would say, or to opt an Owner out of it, before Day 30 or
+   whenever a design partner would actually see one land in their inbox.
+3. `python-service` and the frontend have no structured logging of their
+   own; only the Node API does now. Worth doing if a real customer's first
+   production incident ever needs it, not before.
+4. Still open, low urgency: whether STAFF needs per-location scoping (PRD
+   §12, open since Day 1, no design partner feedback yet to resolve it).
+
+**Blockers/decisions carried forward:**
+
+- None new. The access-token-revocation design choice (reuse
+  `refresh_tokens` rather than a separate revocation table) and the
+  digest's no-dedup choice are both explained inline above and in the
+  code comments they live next to, rather than repeated here.

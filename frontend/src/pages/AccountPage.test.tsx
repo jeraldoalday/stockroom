@@ -3,7 +3,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import { AccountPage } from "./AccountPage";
 import * as client from "../api/client";
 import { MockApi, fail, ok } from "../test/mockApi";
-import { ownerUser, renderApp } from "../test/render";
+import { ownerUser, staffUser, renderApp } from "../test/render";
 import type { Session } from "../api/auth";
 
 // `logout()` (fired after a password change, and when ending the session
@@ -142,6 +142,51 @@ describe("AccountPage change password", () => {
     },
     6000
   );
+});
+
+describe("AccountPage notifications", () => {
+  it("shows the digest as subscribed by default, for an Owner", async () => {
+    api.on("GET", "/auth/sessions", ok([thisDevice]));
+    renderPage();
+
+    const checkbox = await screen.findByLabelText(/Daily low-stock digest/);
+    expect(checkbox).toBeChecked();
+  });
+
+  it("unchecking it opts out and updates the stored user", async () => {
+    api.on("GET", "/auth/sessions", ok([thisDevice]));
+    api.on("PATCH", "/auth/notifications", ok({ ...ownerUser, lowStockDigestOptOut: true }));
+    const { user } = renderPage();
+
+    const checkbox = await screen.findByLabelText(/Daily low-stock digest/);
+    await user.click(checkbox);
+
+    await waitFor(() => expect(api.requestsFor("PATCH", "/auth/notifications")).toHaveLength(1));
+    expect(JSON.parse(api.requestsFor("PATCH", "/auth/notifications")[0].data)).toEqual({
+      lowStockDigestOptOut: true,
+    });
+    await waitFor(() => expect(checkbox).not.toBeChecked());
+    expect(JSON.parse(localStorage.getItem("stockroom_user") ?? "{}").lowStockDigestOptOut).toBe(true);
+  });
+
+  it("surfaces a failed update instead of silently reverting", async () => {
+    api.on("GET", "/auth/sessions", ok([thisDevice]));
+    api.on("PATCH", "/auth/notifications", fail(500, "boom"));
+    const { user } = renderPage();
+
+    const checkbox = await screen.findByLabelText(/Daily low-stock digest/);
+    await user.click(checkbox);
+
+    expect(await screen.findByText("boom")).toBeInTheDocument();
+  });
+
+  it("does not offer the digest setting to Staff, who never receive it", async () => {
+    api.on("GET", "/auth/sessions", ok([thisDevice]));
+    renderApp(<AccountPage />, { user: staffUser });
+
+    await screen.findByText("Chrome on Linux");
+    expect(screen.queryByText("Email notifications")).not.toBeInTheDocument();
+  });
 });
 
 describe("AccountPage sessions", () => {

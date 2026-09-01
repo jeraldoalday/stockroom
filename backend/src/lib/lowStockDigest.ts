@@ -37,8 +37,9 @@ export function formatLowStockDigestEmail(
 }
 
 /**
- * Emails every Owner in an organization once it has at least one product at
- * or below its reorder point.
+ * Emails every Owner in an organization — except one who has opted out on
+ * their Account page — once it has at least one product at or below its
+ * reorder point.
  *
  * PRD §3 goal 3 ("alert on low stock before it becomes a stockout") only
  * ever shipped as something an Owner has to think to go look at — the
@@ -51,9 +52,9 @@ export function formatLowStockDigestEmail(
  * reported, so invoking it twice in the same day means two emails, not a
  * bug to guard against.
  *
- * Sends nothing, silently, for an organization with no Owners — every
- * organization should have at least one, but nothing here depends on that
- * holding, and a digest job is not the place to raise an alarm about it.
+ * Sends nothing, silently, for an organization with no subscribed Owners —
+ * whether because it has none at all, or every Owner has opted out. Neither
+ * case is something a digest job should raise an alarm about.
  */
 export async function sendLowStockDigest(): Promise<LowStockDigestResult> {
   const organizations = await prisma.organization.findMany({ select: { id: true, name: true } });
@@ -66,7 +67,7 @@ export async function sendLowStockDigest(): Promise<LowStockDigestResult> {
     if (items.length === 0) continue;
 
     const owners = await prisma.user.findMany({
-      where: { organizationId: organization.id, role: "OWNER" },
+      where: { organizationId: organization.id, role: "OWNER", lowStockDigestOptOut: false },
       select: { email: true },
     });
     if (owners.length === 0) continue;

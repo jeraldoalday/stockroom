@@ -115,6 +115,50 @@ describe("sendLowStockDigest", () => {
     consoleLog.mockRestore();
   });
 
+  it("skips an Owner who has opted out, but still notifies the rest", async () => {
+    const consoleLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
+    const first = await signUp("owner@shop.test", "The Shop");
+    await inviteStaff(first.accessToken, "second-owner@shop.test");
+    const users = await request(app).get("/api/users").set("Authorization", `Bearer ${first.accessToken}`);
+    const invited = users.body.items.find((u: { email: string }) => u.email === "second-owner@shop.test");
+    await request(app)
+      .patch(`/api/users/${invited.id}`)
+      .set("Authorization", `Bearer ${first.accessToken}`)
+      .send({ role: "OWNER" });
+    await request(app)
+      .patch("/api/auth/notifications")
+      .set("Authorization", `Bearer ${first.accessToken}`)
+      .send({ lowStockDigestOptOut: true });
+    const productId = await createProduct(first.accessToken, "SKU-1", 10);
+    await receiveStock(first.accessToken, productId, 1);
+    consoleLog.mockClear();
+
+    const result = await sendLowStockDigest();
+
+    expect(result.emailsSent).toBe(1);
+    const logged = consoleLog.mock.calls.flat().join("\n");
+    expect(logged).not.toContain("to=owner@shop.test");
+    expect(logged).toContain("to=second-owner@shop.test");
+    consoleLog.mockRestore();
+  });
+
+  it("sends nothing for an organization where every Owner has opted out", async () => {
+    const consoleLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
+    const { accessToken } = await signUp("soleowner@shop.test", "The Shop");
+    await request(app)
+      .patch("/api/auth/notifications")
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send({ lowStockDigestOptOut: true });
+    const productId = await createProduct(accessToken, "SKU-1", 10);
+    await receiveStock(accessToken, productId, 1);
+    consoleLog.mockClear();
+
+    const result = await sendLowStockDigest();
+
+    expect(result).toEqual({ organizationsChecked: 1, organizationsNotified: 0, emailsSent: 0 });
+    consoleLog.mockRestore();
+  });
+
   it("only notifies the organizations that actually have low stock", async () => {
     const consoleLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
     const low = await signUp("low-owner@shop.test", "Low Shop");

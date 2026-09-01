@@ -1,5 +1,5 @@
 import { apiClient } from "./client";
-import type { AuthResponse } from "./types";
+import type { AuthResponse, AuthUser } from "./types";
 
 export interface SignupPayload {
   organizationName: string;
@@ -30,6 +30,11 @@ export interface ChangePasswordPayload {
 
 export async function changePassword(payload: ChangePasswordPayload): Promise<void> {
   await apiClient.patch("/auth/password", payload);
+}
+
+export async function setLowStockDigestOptOut(lowStockDigestOptOut: boolean): Promise<AuthUser> {
+  const res = await apiClient.patch<AuthUser>("/auth/notifications", { lowStockDigestOptOut });
+  return res.data;
 }
 
 export async function forgotPassword(email: string): Promise<void> {

@@ -269,7 +269,7 @@ class Table {
 
 const tables = {
   organization: new Table(),
-  user: new Table({ role: "STAFF" }),
+  user: new Table({ role: "STAFF", lowStockDigestOptOut: false }),
   location: new Table({ isDefault: false, isActive: true }),
   category: new Table({ isActive: true }),
   supplier: new Table({ isActive: true }),

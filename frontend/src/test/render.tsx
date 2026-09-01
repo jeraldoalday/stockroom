@@ -91,6 +91,7 @@ export const ownerUser: AuthUser = {
   name: "Dana Owner",
   email: "owner@northside.test",
   role: "OWNER",
+  lowStockDigestOptOut: false,
 };
 
 /** A STAFF member, used to assert the owner-only controls stay hidden. */
@@ -99,4 +100,5 @@ export const staffUser: AuthUser = {
   name: "Sam Clerk",
   email: "clerk@northside.test",
   role: "STAFF",
+  lowStockDigestOptOut: false,
 };

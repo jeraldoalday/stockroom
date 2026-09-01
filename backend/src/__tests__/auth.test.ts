@@ -172,6 +172,67 @@ describe("PATCH /api/auth/password", () => {
   });
 });
 
+describe("PATCH /api/auth/notifications", () => {
+  async function signUpAndGetToken(email: string) {
+    const res = await request(app).post("/api/auth/signup").send({
+      organizationName: "Corner Store",
+      name: "Jamie Owner",
+      email,
+      password: "hunter22222",
+    });
+    return res.body.accessToken as string;
+  }
+
+  it("rejects an unauthenticated request", async () => {
+    const res = await request(app).patch("/api/auth/notifications").send({ lowStockDigestOptOut: true });
+
+    expect(res.status).toBe(401);
+  });
+
+  it("defaults to subscribed on signup", async () => {
+    const res = await request(app).post("/api/auth/signup").send({
+      organizationName: "Corner Store",
+      name: "Jamie Owner",
+      email: "defaultoptin@cornerstore.test",
+      password: "hunter22222",
+    });
+
+    expect(res.body.user.lowStockDigestOptOut).toBe(false);
+  });
+
+  it("opts out and back in, and reports the current state on login", async () => {
+    const token = await signUpAndGetToken("digestoptout@cornerstore.test");
+
+    const optOut = await request(app)
+      .patch("/api/auth/notifications")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ lowStockDigestOptOut: true });
+    expect(optOut.status).toBe(200);
+    expect(optOut.body.lowStockDigestOptOut).toBe(true);
+
+    const login = await request(app)
+      .post("/api/auth/login")
+      .send({ email: "digestoptout@cornerstore.test", password: "hunter22222" });
+    expect(login.body.user.lowStockDigestOptOut).toBe(true);
+
+    const optIn = await request(app)
+      .patch("/api/auth/notifications")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ lowStockDigestOptOut: false });
+    expect(optIn.body.lowStockDigestOptOut).toBe(false);
+  });
+
+  it("rejects a non-boolean value", async () => {
+    const token = await signUpAndGetToken("digestbadvalue@cornerstore.test");
+
+    const res = await request(app)
+      .patch("/api/auth/notifications")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ lowStockDigestOptOut: "yes" });
+    expect(res.status).toBe(400);
+  });
+});
+
 describe("POST /api/auth/forgot-password + /api/auth/reset-password", () => {
   async function signUp(email: string) {
     return request(app).post("/api/auth/signup").send({

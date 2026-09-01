@@ -125,7 +125,13 @@ router.post(
     res.status(201).json({
       accessToken,
       refreshToken,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role },
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        lowStockDigestOptOut: user.lowStockDigestOptOut,
+      },
       organization: { id: organization.id, name: organization.name },
     });
   })
@@ -170,7 +176,13 @@ router.post(
     res.json({
       accessToken,
       refreshToken,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role },
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        lowStockDigestOptOut: user.lowStockDigestOptOut,
+      },
     });
   })
 );
@@ -310,6 +322,33 @@ router.patch(
     });
 
     res.status(204).send();
+  })
+);
+
+const notificationsSchema = z.object({
+  lowStockDigestOptOut: z.boolean(),
+});
+
+// Self-service opt-out of the daily low-stock digest (F14). It's an
+// ordinary preference, not a credential, so unlike /password this doesn't
+// ask for the current password or touch any session — an Owner should be
+// able to unsubscribe with one click.
+router.patch(
+  "/notifications",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const body = notificationsSchema.parse(req.body);
+    const user = await prisma.user.update({
+      where: { id: req.auth!.userId },
+      data: { lowStockDigestOptOut: body.lowStockDigestOptOut },
+    });
+    res.json({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      lowStockDigestOptOut: user.lowStockDigestOptOut,
+    });
   })
 );
 

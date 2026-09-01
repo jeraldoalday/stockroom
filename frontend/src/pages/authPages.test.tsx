@@ -12,7 +12,7 @@ import { renderApp } from "../test/render";
 const authBody = {
   accessToken: "access-1",
   refreshToken: "refresh-1",
-  user: { id: "u1", name: "Dana Owner", email: "owner@northside.test", role: "OWNER" },
+  user: { id: "u1", name: "Dana Owner", email: "owner@northside.test", role: "OWNER", lowStockDigestOptOut: false },
 };
 
 let api: MockApi;

@@ -15,6 +15,7 @@ interface AuthContextValue {
   user: AuthUser | null;
   isAuthenticated: boolean;
   setSession: (auth: AuthResponse) => void;
+  updateUser: (user: AuthUser) => void;
   logout: () => void;
 }
 
@@ -40,6 +41,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStoredRefreshToken(auth.refreshToken);
     localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(auth.user));
     setUser(auth.user);
+  };
+
+  // For a change that doesn't touch tokens or sessions (e.g. a notification
+  // preference) — unlike setSession, this never runs on a route the app
+  // reaches while signed out, so it only ever replaces an already-stored
+  // user.
+  const updateUser = (updated: AuthUser) => {
+    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(updated));
+    setUser(updated);
   };
 
   const logout = () => {
@@ -68,7 +78,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, isAuthenticated: Boolean(user && getStoredToken()), setSession, logout }),
+    () => ({ user, isAuthenticated: Boolean(user && getStoredToken()), setSession, updateUser, logout }),
     [user]
   );
 

@@ -1,12 +1,12 @@
 import { useEffect, useId, useState } from "react";
 import type { FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useConfirmation } from "../components/useConfirmation";
 import { useAuth } from "../context/AuthContext";
-import { changePassword, endSession, fetchSessions } from "../api/auth";
+import { changePassword, endSession, fetchSessions, setLowStockDigestOptOut } from "../api/auth";
 import type { Session } from "../api/auth";
 import { isApiError } from "../api/errors";
 
@@ -61,12 +61,13 @@ export function AccountPage() {
   // One stable prefix per mounted page, so every label points at its
   // own control even where two forms reuse a field name.
   const fieldId = useId();
-  const { user, logout } = useAuth();
+  const { user, logout, updateUser } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [formError, setFormError] = useState<string | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [digestError, setDigestError] = useState<string | null>(null);
 
   // Changing a password revokes every session for the user, this one
   // included — that is the point of it, since a password is usually changed
@@ -93,6 +94,15 @@ export function AccountPage() {
       setSuccess(false);
       setFormError(describeError(err, "Could not change password"));
     },
+  });
+
+  const digestMutation = useMutation({
+    mutationFn: setLowStockDigestOptOut,
+    onSuccess: (updatedUser) => {
+      setDigestError(null);
+      updateUser(updatedUser);
+    },
+    onError: (err) => setDigestError(describeError(err, "Could not update this preference")),
   });
 
   const sessionsQuery = useQuery({ queryKey: ["sessions"], queryFn: fetchSessions });
@@ -199,6 +209,43 @@ export function AccountPage() {
           </button>
         </div>
       </form>
+
+      {user?.role === "OWNER" && (
+        <>
+          <h2 className="mb-1 mt-8 text-lg font-medium text-gray-900">Email notifications</h2>
+          <p className="mb-3 max-w-2xl text-sm text-gray-500">
+            StockRoom emails every Owner once a day when a product is at or below its reorder
+            point. See what that looks like on the{" "}
+            <Link to="/dashboard" className="text-brand-600 hover:underline">
+              Dashboard&apos;s low-stock panel
+            </Link>
+            .
+          </p>
+          <div className="max-w-md rounded-lg border border-gray-200 bg-white p-4">
+            {digestError && (
+              <div role="alert" className="mb-3 text-sm text-red-600">
+                {digestError}
+              </div>
+            )}
+            <label className="flex items-start gap-3 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={!user.lowStockDigestOptOut}
+                disabled={digestMutation.isPending}
+                onChange={(e) => digestMutation.mutate(!e.target.checked)}
+              />
+              <span>
+                <span className="font-medium text-gray-900">Daily low-stock digest</span>
+                <br />
+                <span className="text-gray-500">
+                  Email me once a day when something needs reordering.
+                </span>
+              </span>
+            </label>
+          </div>
+        </>
+      )}
 
       <h2 className="mb-1 mt-8 text-lg font-medium text-gray-900">Signed-in devices</h2>
       <p className="mb-3 max-w-2xl text-sm text-gray-500">

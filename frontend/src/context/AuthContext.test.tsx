@@ -6,7 +6,13 @@ import { AuthProvider, useAuth } from "./AuthContext";
 import * as client from "../api/client";
 import type { AuthResponse, AuthUser } from "../api/types";
 
-const owner: AuthUser = { id: "u1", name: "Dana Owner", email: "owner@northside.test", role: "OWNER" };
+const owner: AuthUser = {
+  id: "u1",
+  name: "Dana Owner",
+  email: "owner@northside.test",
+  role: "OWNER",
+  lowStockDigestOptOut: false,
+};
 
 const authResponse: AuthResponse = {
   accessToken: "access-1",

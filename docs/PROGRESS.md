@@ -2363,3 +2363,98 @@ re-run beyond what CI already covers on push.
   `refresh_tokens` rather than a separate revocation table) and the
   digest's no-dedup choice are both explained inline above and in the
   code comments they live next to, rather than repeated here.
+
+## Day 28 (post-MVP) — 2026-09-01
+
+**Same container-setup pattern noted on Day 24/26/27:** local `main` was a
+detached HEAD at Day 27's commit with the branch ref stale. `git fetch
+origin main` confirmed `origin/main` matched exactly (no unpushed work
+sitting anywhere this time), so `git checkout -B main origin/main` was
+enough — no re-verification-then-push step was needed, unlike Day 24/26.
+
+**Planned:** the top of the Day 27 "Next" list — the low-stock digest (F14)
+had no frontend surface at all: nothing to show it was on, nothing to turn
+it off.
+
+**Shipped — self-service opt-out of the low-stock digest:**
+
+- `User.lowStockDigestOptOut` (new column, default `false` — subscribed).
+  Lives on every user regardless of role, not just Owners, so a Staff
+  member promoted later already has a sensible value rather than needing a
+  backfill.
+- `PATCH /api/auth/notifications` (`{ lowStockDigestOptOut: boolean }`,
+  requireAuth). Deliberately not modeled on `/auth/password`'s shape: this
+  is an ordinary preference, not a credential, so it doesn't ask for the
+  current password and doesn't touch any session — one click should be
+  enough to unsubscribe.
+- `sendLowStockDigest`'s Owner query gained `lowStockDigestOptOut: false`.
+  An organization where every Owner has opted out now behaves exactly like
+  one with no Owners at all (`organizationsNotified: 0`), which was already
+  a case the function handled silently.
+- Frontend: an "Email notifications" section on the Account page, gated to
+  `role === "OWNER"` since Staff are never sent this digest and a toggle
+  that does nothing for them would just be confusing. A link to the
+  Dashboard's low-stock panel stands in for "preview what this would say"
+  — building a second read path for the same numbers felt like exactly the
+  kind of duplicate-source-of-truth this project has avoided elsewhere
+  (e.g. Day 19's shared dead-stock row-shaping helper).
+- `AuthContext` gained `updateUser`, alongside the existing `setSession`:
+  the notifications toggle changes the stored user without touching tokens
+  or ending any session, which `setSession`'s contract (always takes a
+  fresh token pair) doesn't fit.
+- 4 new backend tests (`auth.test.ts`: unauthenticated 401, defaults to
+  subscribed on signup, opt-out/opt-in round trip reflected on the next
+  login, rejects a non-boolean value) and 2 new digest tests
+  (`lowStockDigest.test.ts`: an opted-out Owner among several is skipped
+  while the rest still get theirs; an organization where the sole Owner
+  opted out sends nothing at all). 4 new frontend tests
+  (`AccountPage.test.tsx`: checked by default, unchecking posts and updates
+  the stored user, a failed update surfaces its message instead of quietly
+  reverting, Staff never see the section at all).
+- Corrected `docs/PRD.md` §6 and `docs/DEPLOYMENT.md` §6, both of which
+  described "no per-user opt-out" as F14's deliberate design — that was
+  true when written and is exactly the gap this session closed.
+
+**Verified beyond the build/test commands:** this sandbox had `psql`,
+`pg_ctlcluster`, and the pre-installed Chromium all available, so this
+landed with real end-to-end verification rather than only the mocked test
+suite. Created the `stockroom` role/db and the `stockroom_readonly` role
+from scratch (neither existed yet), ran all eleven migrations including the
+new one, and confirmed with `psql` that a `PATCH /auth/notifications` call
+against a running backend actually flips the column. Beyond that, two
+digest runs against real data settle the feature's actual point, not just
+its plumbing: an Owner who opted out and received stock below its reorder
+point got no email from `npm run digest:low-stock`, while an otherwise
+identical Owner/product/quantity in a second organization — still
+subscribed — did. Also drove the Account page through a real Chromium
+browser (global `playwright`, not a project dependency, same as Day 26):
+signed up, confirmed the checkbox starts checked, unchecked it, reloaded
+the page (survives across a reload), then signed out and back in and
+confirmed the box was still unchecked on a fresh login response — proving
+the value came from the server's own record, not merely a value cached in
+`localStorage` across the reload.
+
+**Verified (all three services):** backend `npx tsc --noEmit`, `npm run
+lint`, full Jest suite (352/352, up from 346); frontend `npm run lint`,
+`npm test` (343/343, up from 339), `npm run build` (type-checks the tests
+too); python-service `python3 -m pytest -q` (44/44, untouched this
+session — no python-service file was changed). All clean.
+
+**Next:**
+
+1. From the Day 27 list, still open: `python-service` and the frontend have
+   no structured logging of their own (only the Node API does); worth doing
+   once a real customer's first production incident needs it, not before.
+   No metrics or external error reporting either, and no backups
+   configured — both hosting/operational decisions rather than code gaps.
+2. Still open, low urgency: whether STAFF needs per-location scoping (PRD
+   §12, open since Day 1, no design partner feedback yet to resolve it).
+3. No fresh gaps surfaced this session worth adding to the list beyond
+   what Day 27 already left open.
+
+**Blockers/decisions carried forward:**
+
+- None new. Modeling the notifications endpoint as a plain preference PATCH
+  rather than reusing `/auth/password`'s "requires current password, ends
+  every session" shape was a deliberate departure from that neighboring
+  route, explained inline above and in the route's own comment.

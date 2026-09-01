@@ -148,11 +148,12 @@ isn't a request handler or an in-process timer.
 
 - **`npm run prune:tokens`** — hourly. Deletes expired refresh,
   password-reset, and rate-limit-bucket rows.
-- **`npm run digest:low-stock`** — daily. Emails every Owner in an
-  organization once it has a product at or below its reorder point
-  (`backend/src/lib/lowStockDigest.ts`). Unlike the prune sweep this one is
-  never meant to run on an in-process timer at all, even with a single
-  instance — see its own bullet under §7.
+- **`npm run digest:low-stock`** — daily. Emails every subscribed Owner in
+  an organization once it has a product at or below its reorder point
+  (`backend/src/lib/lowStockDigest.ts`); an Owner can unsubscribe from their
+  Account page. Unlike the prune sweep this one is never meant to run on an
+  in-process timer at all, even with a single instance — see its own bullet
+  under §7.
 
 Both exit non-zero on failure and print a one-line summary on success, so
 cron's own mail-on-error (or systemd's failed-unit state) notices a job

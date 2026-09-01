@@ -89,13 +89,16 @@ day 14; the row now reflects what F9 was always meant to include.
 F14 is the push half of goal 3 ("alert on low stock before it becomes a
 stockout"): F8's dashboard list only ever helped an Owner who thought to go
 look. `npm run digest:low-stock` (`backend/src/lib/lowStockDigest.ts`)
-emails every Owner in an organization once it has a product at or below its
-reorder point — meant to run once a day from cron, the same way
-`prune:tokens` does (see `docs/DEPLOYMENT.md`). No per-user opt-out and no
-de-duplication across days by design: a daily digest that always reports
-what's currently low is simple to reason about, and cron's own schedule is
-what keeps it to once a day rather than the app tracking "was this already
-reported" state.
+emails every subscribed Owner in an organization once it has a product at or
+below its reorder point — meant to run once a day from cron, the same way
+`prune:tokens` does (see `docs/DEPLOYMENT.md`). **Day 28** added the
+self-service opt-out this section originally described as absent: an Owner
+can unsubscribe from their Account page (`PATCH /api/auth/notifications`),
+which excludes them from the query the digest sends against — the setting
+has no effect on Staff, who were never sent one. Still no de-duplication
+across days, by design: a daily digest that always reports what's currently
+low is simple to reason about, and cron's own schedule is what keeps it to
+once a day rather than the app tracking "was this already reported" state.
 
 ## 7. Non-functional requirements
 

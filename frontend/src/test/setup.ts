@@ -9,6 +9,22 @@ import { afterEach, beforeEach, vi } from "vitest";
 // request URL would be built from `undefined`.
 vi.stubEnv("VITE_API_URL", "http://api.test/api");
 
+// This jsdom version's Blob (and File, which extends it) has no `.text()` —
+// real browsers have had it for years, and ProductsPage's CSV import relies
+// on it (`file.text()` in handleImport). FileReader is implemented, so it
+// stands in as the polyfill rather than skipping CSV-import coverage
+// entirely or reaching for a real network File API that doesn't exist here.
+if (typeof Blob !== "undefined" && !Blob.prototype.text) {
+  Blob.prototype.text = function (this: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(this);
+    });
+  };
+}
+
 beforeEach(() => {
   // Tokens and the cached user live in localStorage, and jsdom keeps one
   // instance for the whole file. Leaking a token from a signed-in test into

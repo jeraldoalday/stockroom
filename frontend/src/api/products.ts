@@ -6,6 +6,7 @@ export type ProductStatusFilter = "active" | "archived" | "all";
 export interface ProductQuery {
   search?: string;
   status?: ProductStatusFilter;
+  page?: number;
   pageSize?: number;
 }
 

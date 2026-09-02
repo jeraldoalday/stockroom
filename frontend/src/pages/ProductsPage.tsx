@@ -19,6 +19,9 @@ import { emptyListMessage } from "../components/emptyListMessage";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useConfirmation } from "../components/useConfirmation";
 import { useDebouncedValue } from "../components/useDebouncedValue";
+import { Pagination } from "../components/Pagination";
+
+const PAGE_SIZE = 25;
 
 const STATUS_TABS: { value: ProductStatusFilter; label: string }[] = [
   { value: "active", label: "Active" },
@@ -45,6 +48,7 @@ export function ProductsPage() {
   // The box stays controlled by `search` so typing is instant; the query is
   // keyed on the settled value so a word is one request, not one per key.
   const debouncedSearch = useDebouncedValue(search);
+  const [page, setPage] = useState(1);
   // null = form closed; a Product = editing it; "new" = the create form.
   const [formTarget, setFormTarget] = useState<Product | "new" | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -60,8 +64,8 @@ export function ProductsPage() {
   const editing = formTarget !== null && formTarget !== "new" ? formTarget : null;
 
   const productsQuery = useQuery({
-    queryKey: ["products", debouncedSearch, status],
-    queryFn: () => fetchProducts({ search: debouncedSearch || undefined, status }),
+    queryKey: ["products", debouncedSearch, status, page],
+    queryFn: () => fetchProducts({ search: debouncedSearch || undefined, status, page, pageSize: PAGE_SIZE }),
     // Keeps the current results on screen while the next search runs,
     // instead of blanking the table between keystrokes.
     placeholderData: (previous) => previous,
@@ -365,6 +369,7 @@ export function ProductsPage() {
             onClick={() => {
               setRowError(null);
               setStatus(tab.value);
+              setPage(1);
             }}
             className={`rounded px-3 py-1.5 text-sm font-medium ${
               status === tab.value ? "bg-brand-50 text-brand-700" : "text-gray-600 hover:bg-gray-100"
@@ -378,7 +383,10 @@ export function ProductsPage() {
       <input
         placeholder="Search by name or SKU..."
         value={search}
-        onChange={(e) => setSearch(e.target.value)}
+        onChange={(e) => {
+          setSearch(e.target.value);
+          setPage(1);
+        }}
         className="mb-4 w-full max-w-sm rounded-md border border-gray-300 px-3 py-2 text-sm"
       />
 
@@ -464,6 +472,15 @@ export function ProductsPage() {
           </tbody>
         </table>
       </div>
+
+      <Pagination
+        page={productsQuery.data?.page ?? page}
+        pageSize={productsQuery.data?.pageSize ?? PAGE_SIZE}
+        total={productsQuery.data?.total ?? 0}
+        onPageChange={setPage}
+        label="products"
+      />
+
       <ConfirmDialog
         open={pendingArchive.isOpen}
         title="Archive this product?"

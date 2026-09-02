@@ -2458,3 +2458,123 @@ session — no python-service file was changed). All clean.
   rather than reusing `/auth/password`'s "requires current password, ends
   every session" shape was a deliberate departure from that neighboring
   route, explained inline above and in the route's own comment.
+
+## Day 29 (post-MVP) — 2026-09-02
+
+**Same container-setup pattern noted on Day 24/26/27/28:** local `main` was
+a detached HEAD one commit behind a stale branch ref — this time the branch
+ref itself (`bfe8476`, Day 24) was four days further behind than the
+detached HEAD it pointed from (`5c395d7`, Day 28), with the intervening
+history (Days 25-28) sitting unreferenced by any branch. `git fetch origin
+main` confirmed `origin/main` already matched the detached HEAD exactly (no
+work sitting unpushed anywhere), so `git branch` off the newer commit and a
+fast-forward merge onto `main` was enough to recover it — worth calling out
+explicitly since a `git checkout -B main origin/main` here, done without
+checking the detached HEAD first, would have silently discarded nothing
+(origin already had it) but is the wrong reflex in general: always diff the
+detached HEAD against `origin/main` before deciding which one is ahead.
+
+**Planned:** picked up the top of the Day 28 "Next" list — `python-service`
+had no structured logging of its own, unlike the Node API's
+requestId/requestLogger pair from Day 27 — and then did a fresh sweep for
+gaps rather than the next list item verbatim, since both remaining Day 28
+items (STAFF per-location scoping, frontend error reporting) are explicitly
+low-urgency/blocked on things this session can't resolve (design-partner
+feedback; no external error sink to report to). The sweep surfaced a real
+functional bug worth fixing ahead of anything else on the list.
+
+**Shipped — structured request logging for the Python service, correlated
+with the Node API:**
+
+- `app/logger.py` and `app/request_logging.py` mirror the Node API's
+  `lib/logger.ts` / `middleware/requestId.ts` / `middleware/requestLogger.ts`
+  field-for-field (JSON lines: time, level, message, requestId, method,
+  path, status, durationMs) so one log-shape rule covers both services.
+- The middleware honours an `X-Request-Id` the Node API already minted
+  rather than generating a second, unrelated one — `callPythonService` now
+  forwards `req.id` on every proxied call (`backend/src/lib/pythonService.ts`,
+  all 7 call sites in `reports.routes.ts`). A single customer-facing
+  request that fans out into a report call is now grep-able across both
+  services' logs by one id instead of lined up by timestamp.
+- Same caller-supplied-id validation as the Node side (bounded,
+  opaque-token shape) so a malformed incoming header can't smuggle a
+  newline or an oversized string into a JSON log line.
+- New tests: 1 backend (`reports.test.ts`, asserts the header round-trips)
+  and 3 python-service (`test_request_logging.py`: generates one when
+  absent, echoes a well-formed one, replaces a malformed one).
+
+**Shipped — fixed ProductsPage's missing pagination, a real bug found
+while looking for the next gap to close:**
+
+`GET /products` has always returned the same `{ items, total, page,
+pageSize }` envelope every other list endpoint does (default pageSize 25,
+capped at 100 server-side), but ProductsPage was the one list page never
+wired up to the `<Pagination>` control every other list page
+(Customers/Suppliers/Inventory/StockMovements) already uses. Any
+organization with more than 25 active products had no way to see or manage
+the rest from the Products screen — silently capped, no error, no
+indication there was more. Brought it in line with the other pages: `page`
+state, reset to page 1 on search/tab change, `<Pagination>` rendered under
+the table (`frontend/src/pages/ProductsPage.tsx`,
+`frontend/src/api/products.ts`). Verified beyond the test suite: stood up a
+real Postgres + backend + frontend in this sandbox, signed up, created 30
+products via the API, and drove the Products page through a real Chromium
+browser — page 1 showed 25 rows with "1–25 of 30 products", Next revealed
+the remaining 5 with "26–30 of 30 products" (screenshot taken, not kept).
+Teardown after: dev servers killed, `stockroom`/`stockroom_readonly` roles
+and the `stockroom` database dropped.
+
+**Shipped — ProductsPage and ReportsPage's first test suites**, closing
+out what was actually the whole "page-level test suites" effort from Days
+23-25: every other page had one, these two didn't. ProductsPage's covers
+list/search/status-tabs/pagination/create/edit/archive/restore/CSV-import
+and the Owner-only cost field (48 assertions across 24 tests, including
+the pagination fix above). ReportsPage's covers its four independent
+panels (trend, reorder suggestions, dead stock, CSV export), each one's
+own loading/empty/error state, the 7/30-day and dead-stock-window toggles,
+and the Owner-only dead-stock panel/export (23 tests).
+
+Two test-infrastructure gaps surfaced along the way, both fixed in
+`frontend/src/test/setup.ts` / inline in the new suite rather than worked
+around:
+
+- This project's jsdom version (`jsdom@25.0.1` as installed, oddly missing
+  a method real browsers have shipped for years) has no
+  `Blob`/`File.prototype.text()`, which `ProductsPage`'s CSV import relies
+  on (`file.text()` in `handleImport`). Polyfilled globally in
+  `test/setup.ts` via `FileReader`, which jsdom does implement — the same
+  jsdom gap would have blocked any future page's file-upload tests too, so
+  fixing it in shared setup beats a one-off workaround in this suite alone.
+- The same jsdom has no `URL.createObjectURL`/`revokeObjectURL`, which
+  `downloadExport` needs to turn a CSV blob into a clickable link. Only
+  `ReportsPage` calls it today, so this one is stubbed locally in
+  `ReportsPage.test.tsx` via `vi.stubGlobal` rather than promoted to shared
+  setup — worth revisiting if a second page grows an export button.
+
+**Verified (all three services):** backend `npx tsc --noEmit`, `npm run
+lint`, full Jest suite (353/353, up from 352 — one new request-id-forwarding
+test); frontend `npm run lint`, `tsc -b`, `npm test` (390/390, up from 343
+— 24 ProductsPage + 23 ReportsPage), `npm run build`; python-service
+`python3 -m pytest -q` (47/47, up from 44 — 3 new request-logging tests).
+All clean.
+
+**Next:**
+
+1. Frontend structured error logging: still nothing to report to (no
+   Sentry or similar configured), so still not worth doing until there's an
+   external sink — same reasoning as Day 28, now covering three of the
+   thing's four sides (Node API, Python service, frontend) instead of one.
+2. Still open, low urgency: whether STAFF needs per-location scoping (PRD
+   §12, open since Day 1, no design partner feedback yet to resolve it).
+3. No other fresh gaps surfaced this session beyond the ProductsPage
+   pagination bug fixed above.
+
+**Blockers/decisions carried forward:**
+
+- None new. The choice to stub `URL.createObjectURL` locally in
+  `ReportsPage.test.tsx` rather than promoting it to shared `test/setup.ts`
+  (unlike the `Blob.prototype.text` polyfill, which did go into shared
+  setup) is explained inline above: only one page needs it today, so a
+  local stub beats speculatively widening shared test scaffolding for a
+  second caller that doesn't exist yet.
+  route, explained inline above and in the route's own comment.

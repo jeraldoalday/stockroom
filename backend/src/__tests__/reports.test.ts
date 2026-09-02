@@ -55,6 +55,21 @@ describe("GET /api/reports/*", () => {
     expect((calledInit.headers as Record<string, string>)["x-internal-key"]).toBeTruthy();
   });
 
+  it("forwards the request id to the python service so both services' logs share one id", async () => {
+    const token = await signUpAndGetToken("owner9@shop.test", "Shop 9");
+    const fetchSpy = mockPythonServiceResponse("sku,name\nSKU-1,Widget\n");
+
+    const res = await request(app)
+      .get("/api/reports/export/products")
+      .set("Authorization", `Bearer ${token}`)
+      .set("X-Request-Id", "req-abc123");
+
+    expect(res.status).toBe(200);
+    expect(res.headers["x-request-id"]).toBe("req-abc123");
+    const calledInit = fetchSpy.mock.calls[0][1] as RequestInit;
+    expect((calledInit.headers as Record<string, string>)["x-request-id"]).toBe("req-abc123");
+  });
+
   it("tells the python service to drop cost data when a STAFF user exports products", async () => {
     const ownerToken = await signUpAndGetToken("owner8@shop.test", "Shop 8");
     const invite = await inviteAndSetPassword(app, ownerToken, { email: "clerk8@shop.test", password: "hunter22222" });

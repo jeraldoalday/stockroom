@@ -268,7 +268,7 @@ add a second instance.
   to note it moved off the per-process list a session after the one above
   described it.
 - ~~**No structured logging, and unhandled 500s carry no request id.**~~
-  **Partially resolved:** every request now carries an id
+  **Partially resolved:** every Node API request carries an id
   (`middleware/requestId.ts`) echoed on the `X-Request-Id` response
   header, and `middleware/requestLogger.ts` writes one JSON-lines log per
   request (method, path, status, duration, org/user when authenticated) via
@@ -276,11 +276,19 @@ add a second instance.
   stack, so a customer-reported failure (they hand support the id off their
   own network tab or an error toast) can be grepped straight to its server
   log line instead of only being catchable by whoever happened to be
-  tailing `console.error` at the time. Still no metrics or external error
-  reporting (Sentry or similar) — these lines go to stdout, which is fine
-  for a platform that captures process output (Railway, most PaaS targets)
-  and nowhere on its own if you're running bare `node` with nothing
-  collecting it.
+  tailing `console.error` at the time. The Python service now does the same
+  (`app/request_logging.py`, `app/logger.py`) — and it honours an
+  `X-Request-Id` the Node API already minted rather than generating a second,
+  unrelated id, since `callPythonService` forwards the caller's id on every
+  proxied call. A single customer-facing request that fans out into a
+  report call is grep-able across both services' logs by that one id. Still
+  nothing on the frontend (a client-side error would need an external sink
+  like Sentry to go anywhere — printing structured JSON to the browser
+  console has no one to grep it), and still no metrics or external error
+  reporting on either backend service — these lines go to stdout, which is
+  fine for a platform that captures process output (Railway, most PaaS
+  targets) and nowhere on its own if you're running bare `node`/`uvicorn`
+  with nothing collecting it.
 - **No backups configured.** The `docker-compose.yml` in this repository is
   for local development: its Postgres has no backup, no WAL archiving and
   default credentials. Use a managed database in production.

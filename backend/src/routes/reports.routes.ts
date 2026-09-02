@@ -26,7 +26,7 @@ router.get(
       // column server-side rather than the Node proxy trying to edit CSV
       // text after the fact.
       include_cost: String(req.auth!.role === "OWNER"),
-    });
+    }, req.id);
     sendProxied(res, result);
   })
 );
@@ -34,7 +34,11 @@ router.get(
 router.get(
   "/export/stock",
   asyncHandler(async (req, res) => {
-    const result = await callPythonService("/export/stock", { organization_id: req.auth!.organizationId });
+    const result = await callPythonService(
+      "/export/stock",
+      { organization_id: req.auth!.organizationId },
+      req.id
+    );
     sendProxied(res, result);
   })
 );
@@ -43,10 +47,14 @@ router.get(
   "/export/movements",
   asyncHandler(async (req, res) => {
     const query = daysQuerySchema.parse(req.query);
-    const result = await callPythonService("/export/movements", {
-      organization_id: req.auth!.organizationId,
-      ...(query.days ? { days: String(query.days) } : {}),
-    });
+    const result = await callPythonService(
+      "/export/movements",
+      {
+        organization_id: req.auth!.organizationId,
+        ...(query.days ? { days: String(query.days) } : {}),
+      },
+      req.id
+    );
     sendProxied(res, result);
   })
 );
@@ -64,10 +72,14 @@ router.get(
   requireRole("OWNER"),
   asyncHandler(async (req, res) => {
     const query = deadStockExportQuerySchema.parse(req.query);
-    const result = await callPythonService("/export/dead-stock", {
-      organization_id: req.auth!.organizationId,
-      ...(query.days ? { days: String(query.days) } : {}),
-    });
+    const result = await callPythonService(
+      "/export/dead-stock",
+      {
+        organization_id: req.auth!.organizationId,
+        ...(query.days ? { days: String(query.days) } : {}),
+      },
+      req.id
+    );
     sendProxied(res, result);
   })
 );
@@ -78,10 +90,14 @@ router.get(
   "/trend",
   asyncHandler(async (req, res) => {
     const query = daysQuerySchema.parse(req.query);
-    const result = await callPythonService("/reports/trend", {
-      organization_id: req.auth!.organizationId,
-      ...(query.days ? { days: String(query.days) } : {}),
-    });
+    const result = await callPythonService(
+      "/reports/trend",
+      {
+        organization_id: req.auth!.organizationId,
+        ...(query.days ? { days: String(query.days) } : {}),
+      },
+      req.id
+    );
     res.type("application/json").send(result.body);
   })
 );
@@ -97,11 +113,15 @@ router.get(
   "/reorder-suggestions",
   asyncHandler(async (req, res) => {
     const query = reorderSuggestionsQuerySchema.parse(req.query);
-    const result = await callPythonService("/reports/reorder-suggestions", {
-      organization_id: req.auth!.organizationId,
-      ...(query.days ? { days: String(query.days) } : {}),
-      ...(query.coverageDays ? { coverage_days: String(query.coverageDays) } : {}),
-    });
+    const result = await callPythonService(
+      "/reports/reorder-suggestions",
+      {
+        organization_id: req.auth!.organizationId,
+        ...(query.days ? { days: String(query.days) } : {}),
+        ...(query.coverageDays ? { coverage_days: String(query.coverageDays) } : {}),
+      },
+      req.id
+    );
     res.type("application/json").send(result.body);
   })
 );
@@ -127,11 +147,15 @@ router.get(
   requireRole("OWNER"),
   asyncHandler(async (req, res) => {
     const query = deadStockQuerySchema.parse(req.query);
-    const result = await callPythonService("/reports/dead-stock", {
-      organization_id: req.auth!.organizationId,
-      ...(query.days ? { days: String(query.days) } : {}),
-      ...(query.limit ? { limit: String(query.limit) } : {}),
-    });
+    const result = await callPythonService(
+      "/reports/dead-stock",
+      {
+        organization_id: req.auth!.organizationId,
+        ...(query.days ? { days: String(query.days) } : {}),
+        ...(query.limit ? { limit: String(query.limit) } : {}),
+      },
+      req.id
+    );
     res.type("application/json").send(result.body);
   })
 );

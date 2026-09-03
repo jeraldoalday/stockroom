@@ -19,6 +19,7 @@ const movement: StockMovement = {
   type: "RECEIVE",
   quantity: 20,
   unitPriceCents: null,
+  stocktakeId: null,
   reason: null,
   createdAt: "2026-08-20T00:00:00.000Z",
   product: { id: "p1", sku: "SKU-1", name: "Widget", description: null, categoryId: null, priceCents: 999, reorderPoint: 5, reorderQty: 10, isActive: true },

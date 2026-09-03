@@ -121,6 +121,10 @@ export interface StockMovement {
   // to STAFF, unlike cost: PRD §4 withholds margin data, not prices.
   unitPriceCents: number | null;
   reason: string | null;
+  // Set on the ADJUSTMENT movements a completed stocktake posts, so a batch
+  // of corrections reads as one reconciliation rather than as a clerk
+  // making a dozen unrelated edits in the same second.
+  stocktakeId: string | null;
   createdAt: string;
   product?: Product;
   location?: Location;
@@ -222,4 +226,66 @@ export interface TeamMember {
 
 export interface TeamMemberListResponse {
   items: TeamMember[];
+}
+
+export type StocktakeStatus = "OPEN" | "COMPLETED" | "CANCELLED";
+
+/** Which products the server puts on a new count sheet. */
+export type StocktakeScope = "with-stock" | "all-products";
+
+export interface StocktakeLine {
+  id: string;
+  productId: string;
+  /** What the system believed when the sheet was created — a snapshot. */
+  expectedQty: number;
+  /** Null until somebody counts it; 0 means "counted, and it's empty". */
+  countedQty: number | null;
+  /** The signed correction posted at completion; null until then. */
+  appliedDelta: number | null;
+  countedAt: string | null;
+  product?: Product | null;
+  countedBy?: MovementActor | null;
+}
+
+export interface StocktakeVariance {
+  lineId: string;
+  productId: string;
+  expectedQty: number;
+  countedQty: number;
+  /** Counted against the sheet the counter was given. */
+  variance: number;
+  /** What was really posted to stock, measured against live quantity. */
+  appliedDelta: number;
+}
+
+export interface StocktakeSummary {
+  countedLines: number;
+  adjustedLines: number;
+  unitsFound: number;
+  unitsLost: number;
+  variances: StocktakeVariance[];
+}
+
+export interface Stocktake {
+  id: string;
+  locationId: string;
+  status: StocktakeStatus;
+  notes: string | null;
+  createdAt: string;
+  completedAt: string | null;
+  location?: Location | null;
+  createdBy?: MovementActor | null;
+  completedBy?: MovementActor | null;
+  lineCount: number;
+  countedCount: number;
+  lines?: StocktakeLine[];
+  /** Present only on the response to completing a count. */
+  summary?: StocktakeSummary;
+}
+
+export interface StocktakeListResponse {
+  items: Stocktake[];
+  total: number;
+  page: number;
+  pageSize: number;
 }

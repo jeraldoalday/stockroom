@@ -8,6 +8,7 @@ const navItems = [
   { to: "/categories", label: "Categories" },
   { to: "/inventory", label: "Inventory" },
   { to: "/stock-movements", label: "Stock Movements" },
+  { to: "/stocktakes", label: "Stocktakes" },
   { to: "/purchase-orders", label: "Purchase Orders" },
   { to: "/sales-orders", label: "Sales Orders" },
   { to: "/reports", label: "Reports" },

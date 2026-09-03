@@ -13,6 +13,7 @@ import { InventoryPage } from "./pages/InventoryPage";
 import { StockMovementsPage } from "./pages/StockMovementsPage";
 import { PurchaseOrdersPage } from "./pages/PurchaseOrdersPage";
 import { SalesOrdersPage } from "./pages/SalesOrdersPage";
+import { StocktakesPage } from "./pages/StocktakesPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { TeamPage } from "./pages/TeamPage";
 import { AccountPage } from "./pages/AccountPage";
@@ -102,6 +103,14 @@ export function App() {
         element={
           <ProtectedRoute>
             <SalesOrdersPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/stocktakes"
+        element={
+          <ProtectedRoute>
+            <StocktakesPage />
           </ProtectedRoute>
         }
       />

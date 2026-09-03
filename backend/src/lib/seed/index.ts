@@ -11,9 +11,11 @@ import {
   SEED_SUPPLIERS,
 } from "./catalog";
 import { dateDaysAgo, planHistory, productBySku } from "./history";
+import { SEED_STOCKTAKES } from "./stocktakes";
 
 export * from "./catalog";
 export * from "./history";
+export * from "./stocktakes";
 
 // Structurally typed against the bits of PrismaClient the seed uses, so the
 // same code runs against the real client from prisma/seed.ts and against
@@ -42,6 +44,8 @@ export interface SeedClient {
   purchaseOrderLine: Delegate;
   salesOrder: Delegate;
   salesOrderLine: Delegate;
+  stocktake: Delegate;
+  stocktakeLine: Delegate;
 }
 
 export interface SeedOptions {
@@ -66,6 +70,7 @@ export interface SeedSummary {
     stockMovements: number;
     purchaseOrders: number;
     salesOrders: number;
+    stocktakes: number;
   };
   totalStockValueCents: number;
 }
@@ -95,7 +100,15 @@ async function clearExistingDemoOrg(client: SeedClient, log: (message: string) =
     await client.salesOrderLine.deleteMany({ where: { salesOrderId: order.id as string } });
   }
 
+  const stocktakes = await client.stocktake.findMany({ where: { organizationId } });
+  for (const stocktake of stocktakes) {
+    await client.stocktakeLine.deleteMany({ where: { stocktakeId: stocktake.id as string } });
+  }
+
+  // Movements first: a completed stocktake's adjustments point at it, and
+  // the FK is RESTRICT in that direction.
   await client.stockMovement.deleteMany({ where: { organizationId } });
+  await client.stocktake.deleteMany({ where: { organizationId } });
   await client.purchaseOrder.deleteMany({ where: { organizationId } });
   await client.salesOrder.deleteMany({ where: { organizationId } });
   await client.inventoryItem.deleteMany({ where: { organizationId } });
@@ -106,6 +119,19 @@ async function clearExistingDemoOrg(client: SeedClient, log: (message: string) =
   await client.location.deleteMany({ where: { organizationId } });
   await client.user.deleteMany({ where: { organizationId } });
   await client.organization.deleteMany({ where: { id: organizationId } });
+}
+
+/**
+ * The seed's own movement total, read back rather than assumed.
+ *
+ * It used to be `history.movements.length`, which stopped being the whole
+ * story once a completed stocktake started posting adjustments of its own —
+ * the summary would have under-reported by however many corrections the
+ * count applied.
+ */
+async function countMovements(client: SeedClient, organizationId: string): Promise<number> {
+  const movements = await client.stockMovement.findMany({ where: { organizationId } });
+  return movements.length;
 }
 
 export async function seedDemoData(client: SeedClient, options: SeedOptions = {}): Promise<SeedSummary> {
@@ -234,6 +260,67 @@ export async function seedDemoData(client: SeedClient, options: SeedOptions = {}
     });
   }
 
+  log("Recording stock counts...");
+
+  // Before the inventory rows are written, deliberately. A completed count
+  // posts real ADJUSTMENT movements, so its corrections have to land in the
+  // settled totals below or the demo would ship with a ledger that
+  // disagrees with its own movement history — the one invariant this whole
+  // system rests on.
+  for (const plan of SEED_STOCKTAKES) {
+    const completed = plan.status === "COMPLETED";
+    const createdAt = dateDaysAgo(now, plan.daysAgo);
+    const stocktake = await client.stocktake.create({
+      data: {
+        organizationId,
+        locationId: locationsByName.get(plan.locationName),
+        status: plan.status,
+        notes: plan.notes,
+        createdById: staff.id,
+        completedById: completed ? owner.id : null,
+        completedAt: completed ? createdAt : null,
+        createdAt,
+      },
+    });
+
+    for (const line of plan.lines) {
+      const key = `${line.sku}::${plan.locationName}`;
+      const expectedQty = history.quantities.get(key) ?? 0;
+      // A count can't come out negative, however the variance was written.
+      const countedQty = line.variance === null ? null : Math.max(0, expectedQty + line.variance);
+      const appliedDelta = completed && countedQty !== null ? countedQty - expectedQty : null;
+
+      await client.stocktakeLine.create({
+        data: {
+          stocktakeId: stocktake.id,
+          productId: productsBySku.get(line.sku),
+          expectedQty,
+          countedQty,
+          countedById: countedQty === null ? null : staff.id,
+          countedAt: countedQty === null ? null : createdAt,
+          appliedDelta,
+        },
+      });
+
+      if (!appliedDelta) continue;
+      history.quantities.set(key, expectedQty + appliedDelta);
+      await client.stockMovement.create({
+        data: {
+          organizationId,
+          productId: productsBySku.get(line.sku),
+          locationId: locationsByName.get(plan.locationName),
+          type: "ADJUSTMENT",
+          quantity: appliedDelta,
+          unitPriceCents: null,
+          reason: `Stocktake ${stocktake.id}`,
+          actorId: owner.id,
+          stocktakeId: stocktake.id,
+          createdAt,
+        },
+      });
+    }
+  }
+
   // InventoryItem is a derived cache the movement engine keeps in step
   // inside each transaction; seeding writes the settled totals directly
   // from the same simulation that produced the movements, so the two agree
@@ -332,9 +419,10 @@ export async function seedDemoData(client: SeedClient, options: SeedOptions = {}
       products: SEED_PRODUCTS.length,
       suppliers: SEED_SUPPLIERS.length,
       customers: SEED_CUSTOMERS.length,
-      stockMovements: history.movements.length,
+      stockMovements: await countMovements(client, organizationId),
       purchaseOrders: purchaseOrderPlans.length,
       salesOrders: salesOrderPlans.length,
+      stocktakes: SEED_STOCKTAKES.length,
     },
     totalStockValueCents,
   };

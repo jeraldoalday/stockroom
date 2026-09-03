@@ -8,6 +8,7 @@ import {
   DEMO_OWNER_EMAIL,
   DEMO_STAFF_EMAIL,
   SEED_PRODUCTS,
+  SEED_STOCKTAKES,
   createRandom,
   planHistory,
   runningLowSkus,
@@ -361,5 +362,82 @@ describe("seedDemoData", () => {
 
     expect(summary.totalStockValueCents).toBe(expected);
     expect(summary.totalStockValueCents).toBeGreaterThan(0);
+  });
+});
+
+describe("seedDemoData stocktakes", () => {
+  it("seeds one finished count and one still in progress", async () => {
+    const summary = await seedDemoData(client, { now: NOW, days: 30 });
+    const stocktakes = await client.stocktake.findMany({
+      where: { organizationId: summary.organizationId },
+    });
+
+    expect(summary.counts.stocktakes).toBe(SEED_STOCKTAKES.length);
+    expect(stocktakes.map((s) => s.status).sort()).toEqual(["COMPLETED", "OPEN"]);
+  });
+
+  it("leaves an open count with lines nobody has reached yet", async () => {
+    const summary = await seedDemoData(client, { now: NOW, days: 30 });
+    const [open] = await client.stocktake.findMany({
+      where: { organizationId: summary.organizationId, status: "OPEN" },
+    });
+    const lines = await client.stocktakeLine.findMany({ where: { stocktakeId: open.id as string } });
+
+    // A half-finished sheet is the state the screen most needs to show, so
+    // the demo has to actually contain one.
+    expect(lines.some((line) => line.countedQty === null)).toBe(true);
+    expect(lines.some((line) => line.countedQty !== null)).toBe(true);
+    expect(lines.every((line) => line.appliedDelta === null)).toBe(true);
+  });
+
+  it("posts a movement for every correction a completed count applied, and only those", async () => {
+    const summary = await seedDemoData(client, { now: NOW, days: 30 });
+    const organizationId = summary.organizationId;
+    const [completed] = await client.stocktake.findMany({ where: { organizationId, status: "COMPLETED" } });
+    const lines = await client.stocktakeLine.findMany({ where: { stocktakeId: completed.id as string } });
+    const movements = await client.stockMovement.findMany({
+      where: { organizationId, stocktakeId: completed.id as string },
+    });
+
+    const corrections = lines.filter((line) => (line.appliedDelta as number | null) ?? 0);
+    expect(movements).toHaveLength(corrections.length);
+    expect(movements.length).toBeGreaterThan(0);
+    expect(movements.every((movement) => movement.type === "ADJUSTMENT")).toBe(true);
+    // F5's rule holds for these too: no adjustment without a reason.
+    expect(movements.every((movement) => Boolean(movement.reason))).toBe(true);
+  });
+
+  it("records a matching line as counted-and-agreed rather than uncounted", async () => {
+    const summary = await seedDemoData(client, { now: NOW, days: 30 });
+    const [completed] = await client.stocktake.findMany({
+      where: { organizationId: summary.organizationId, status: "COMPLETED" },
+    });
+    const lines = await client.stocktakeLine.findMany({ where: { stocktakeId: completed.id as string } });
+
+    const agreed = lines.filter((line) => line.appliedDelta === 0);
+    expect(agreed.length).toBeGreaterThan(0);
+    expect(agreed.every((line) => line.countedQty !== null)).toBe(true);
+  });
+
+  it("never counts a line below zero, however the variance was written", async () => {
+    const summary = await seedDemoData(client, { now: NOW, days: 30 });
+    const stocktakes = await client.stocktake.findMany({ where: { organizationId: summary.organizationId } });
+
+    for (const stocktake of stocktakes) {
+      const lines = await client.stocktakeLine.findMany({ where: { stocktakeId: stocktake.id as string } });
+      expect(lines.every((line) => ((line.countedQty as number | null) ?? 0) >= 0)).toBe(true);
+      expect(lines.every((line) => (line.expectedQty as number) >= 0)).toBe(true);
+    }
+  });
+
+  it("clears its own stocktakes on a re-run instead of stacking them up", async () => {
+    await seedDemoData(client, { now: NOW, days: 20 });
+    const summary = await seedDemoData(client, { now: NOW, days: 20 });
+
+    const stocktakes = await client.stocktake.findMany({});
+    const lines = await client.stocktakeLine.findMany({});
+    expect(stocktakes).toHaveLength(SEED_STOCKTAKES.length);
+    expect(lines).toHaveLength(SEED_STOCKTAKES.reduce((total, plan) => total + plan.lines.length, 0));
+    expect(summary.counts.stocktakes).toBe(SEED_STOCKTAKES.length);
   });
 });

@@ -31,6 +31,7 @@ async function main() {
     console.log(`  Stock movements ${summary.counts.stockMovements}`);
     console.log(`  Purchase orders ${summary.counts.purchaseOrders}`);
     console.log(`  Sales orders    ${summary.counts.salesOrders}`);
+    console.log(`  Stocktakes      ${summary.counts.stocktakes}`);
     console.log(`  Stock value     ${formatCents(summary.totalStockValueCents)}`);
     console.log("\nSign in with:\n");
     console.log(`  Owner   ${summary.ownerEmail} / ${summary.password}`);

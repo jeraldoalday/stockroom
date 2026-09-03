@@ -38,6 +38,17 @@ enum SalesOrderStatus {
   CANCELLED
 }
 
+// A stocktake is open while it is being counted and then terminal, so it
+// has no equivalent of a purchase order's DRAFT -> ORDERED middle step:
+// there is nothing to approve between "we are counting" and "the count is
+// the truth now". OPEN rather than DRAFT for the same reason — a count in
+// progress is a real, in-flight piece of work, not an unsent draft.
+enum StocktakeStatus {
+  OPEN
+  COMPLETED
+  CANCELLED
+}
+
 model Organization {
   id        String   @id @default(cuid())
   name      String
@@ -53,6 +64,7 @@ model Organization {
   stockMovements StockMovement[]
   purchaseOrders PurchaseOrder[]
   salesOrders    SalesOrder[]
+  stocktakes     Stocktake[]
 
   @@map("organizations")
 }
@@ -73,9 +85,12 @@ model User {
   createdAt            DateTime     @default(now())
   updatedAt            DateTime     @updatedAt
 
-  stockMovements      StockMovement[]
-  passwordResetTokens PasswordResetToken[]
-  refreshTokens       RefreshToken[]
+  stockMovements        StockMovement[]
+  passwordResetTokens   PasswordResetToken[]
+  refreshTokens         RefreshToken[]
+  stocktakesCreated     Stocktake[]          @relation("StocktakeCreatedBy")
+  stocktakesCompleted   Stocktake[]          @relation("StocktakeCompletedBy")
+  stocktakeLinesCounted StocktakeLine[]      @relation("StocktakeLineCountedBy")
 
   @@unique([email])
   @@index([organizationId])
@@ -164,6 +179,7 @@ model Location {
   inventoryItems InventoryItem[]
   stockMovements StockMovement[]
   salesOrders    SalesOrder[]
+  stocktakes     Stocktake[]
 
   @@unique([organizationId, name])
   @@index([organizationId])
@@ -253,6 +269,7 @@ model Product {
   stockMovements     StockMovement[]
   purchaseOrderLines PurchaseOrderLine[]
   salesOrderLines    SalesOrderLine[]
+  stocktakeLines     StocktakeLine[]
 
   @@unique([organizationId, sku])
   @@index([organizationId])
@@ -304,11 +321,18 @@ model StockMovement {
   purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
   salesOrderId    String?
   salesOrder      SalesOrder?    @relation(fields: [salesOrderId], references: [id])
+  // Set on the ADJUSTMENT movements a completed stocktake posts, so the
+  // audit trail can say *why* twelve unrelated products were all adjusted
+  // within the same second. Without it a count reconciliation is
+  // indistinguishable from a clerk making twelve individual corrections.
+  stocktakeId     String?
+  stocktake       Stocktake?     @relation(fields: [stocktakeId], references: [id])
   createdAt       DateTime       @default(now())
 
   @@index([organizationId])
   @@index([organizationId, productId, locationId])
   @@index([organizationId, createdAt])
+  @@index([stocktakeId])
   @@map("stock_movements")
 }
 
@@ -403,4 +427,80 @@ model RateLimitBucket {
   resetAt DateTime
 
   @@map("rate_limit_buckets")
+}
+
+// F15 — physical stock count (stocktake / cycle count).
+//
+// Every other write path in this system explains a *change*: goods arrived,
+// goods sold, someone moved a box. A stocktake explains a *disagreement* —
+// what the shelf actually holds versus what the ledger believes it holds.
+// Before this existed the only way to reconcile the two was to eyeball the
+// Inventory page and post one-off ADJUSTMENT movements product by product,
+// which left no record that a count had happened at all: no scope, no
+// variance total, no way to answer "when did we last count the back room"
+// or "how much shrinkage did that count find".
+//
+// The count is scoped to one location, because that is how counting
+// physically works — a person walks one room with one list. Counting the
+// same product at three locations is three stocktakes.
+model Stocktake {
+  id             String          @id @default(cuid())
+  organizationId String
+  organization   Organization    @relation(fields: [organizationId], references: [id])
+  locationId     String
+  location       Location        @relation(fields: [locationId], references: [id])
+  status         StocktakeStatus @default(OPEN)
+  notes          String?
+  createdById    String
+  createdBy      User            @relation("StocktakeCreatedBy", fields: [createdById], references: [id])
+  // Who signed the count off, and when. Distinct from createdBy on purpose:
+  // the manager who opens a count is routinely not the person who closes it,
+  // and applying a variance is the moment stock value changes on the books.
+  completedById  String?
+  completedBy    User?           @relation("StocktakeCompletedBy", fields: [completedById], references: [id])
+  completedAt    DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  lines          StocktakeLine[]
+  stockMovements StockMovement[]
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([locationId])
+  @@map("stocktakes")
+}
+
+// One product on one count sheet.
+//
+// `expectedQty` is a snapshot taken when the line is created, not a live
+// read: it is what the system believed at the moment the sheet was printed,
+// which is the number the counter was comparing against. It is deliberately
+// *not* what the completion step adjusts against — see applyStocktake() in
+// lib/stocktake.ts for why that distinction matters when stock moves while
+// a count is open.
+model StocktakeLine {
+  id           String    @id @default(cuid())
+  stocktakeId  String
+  stocktake    Stocktake @relation(fields: [stocktakeId], references: [id])
+  productId    String
+  product      Product   @relation(fields: [productId], references: [id])
+  expectedQty  Int
+  // Null until somebody counts it. "Not counted" and "counted zero" are
+  // different facts — the first leaves stock untouched at completion, the
+  // second writes the shelf down to empty — so this cannot default to 0.
+  countedQty   Int?
+  countedById  String?
+  countedBy    User?     @relation("StocktakeLineCountedBy", fields: [countedById], references: [id])
+  countedAt    DateTime?
+  // The signed delta actually posted to stock when the count was completed,
+  // recorded so the variance stays readable afterwards even though
+  // expectedQty (a snapshot) may by then differ from what was adjusted.
+  appliedDelta Int?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([stocktakeId, productId])
+  @@index([stocktakeId])
+  @@map("stocktake_lines")
 }

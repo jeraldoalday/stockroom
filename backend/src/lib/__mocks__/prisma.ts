@@ -281,6 +281,11 @@ const tables = {
   purchaseOrderLine: new Table({ quantityReceived: 0 }),
   salesOrder: new Table({ status: "DRAFT" }),
   salesOrderLine: new Table(),
+  stocktake: new Table({ status: "OPEN", completedById: null, completedAt: null, notes: null }),
+  // countedQty/appliedDelta default to null rather than 0: "not counted"
+  // and "counted zero" are different facts (see schema.prisma), and a mock
+  // that defaulted them to 0 would make every uncounted line look counted.
+  stocktakeLine: new Table({ countedQty: null, countedById: null, countedAt: null, appliedDelta: null }),
   passwordResetToken: new Table({ usedAt: null }),
   refreshToken: new Table({ revokedAt: null, replacedById: null }),
   rateLimitBucket: new Table(),

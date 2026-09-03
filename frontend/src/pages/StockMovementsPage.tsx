@@ -2,12 +2,13 @@ import { useId, useState } from "react";
 import type { FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
+import { movementReason } from "../components/movementReason";
 import { fetchProducts } from "../api/products";
 import { fetchLocations } from "../api/locations";
 import { createStockMovement, fetchStockMovements, transferStock } from "../api/stockMovements";
 import { isApiError } from "../api/errors";
 import { Pagination } from "../components/Pagination";
-import type { MovementType } from "../api/types";
+import type { MovementType, StockMovement } from "../api/types";
 
 const MOVEMENT_LABELS: Record<MovementType, string> = {
   RECEIVE: "Received",
@@ -24,6 +25,22 @@ function formatCents(cents: number): string {
 }
 
 const MOVEMENT_TYPES = Object.keys(MOVEMENT_LABELS) as MovementType[];
+
+/**
+ * The Reason cell. A stocktake's adjustments carry a generated
+ * `Stocktake <id>` reason that is useful in the database and unreadable in
+ * a table, so they are shown as a tag instead — see movementReason().
+ */
+function MovementReasonCell({ movement }: { movement: StockMovement }) {
+  const { badge, text } = movementReason(movement);
+  if (!badge) return <>{text ?? "—"}</>;
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-700">{badge}</span>
+      {text}
+    </span>
+  );
+}
 
 export function StockMovementsPage() {
   // One stable prefix per mounted page, so every label points at its
@@ -420,7 +437,9 @@ export function StockMovementsPage() {
                     ? "—"
                     : formatCents(movement.unitPriceCents)}
                 </td>
-                <td className="px-4 py-2 text-gray-500">{movement.reason ?? "—"}</td>
+                <td className="px-4 py-2 text-gray-500">
+                  <MovementReasonCell movement={movement} />
+                </td>
                 <td className="px-4 py-2 text-gray-500">{movement.actor?.name ?? "—"}</td>
               </tr>
             ))}

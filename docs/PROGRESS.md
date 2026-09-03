@@ -2578,3 +2578,153 @@ All clean.
   local stub beats speculatively widening shared test scaffolding for a
   second caller that doesn't exist yet.
   route, explained inline above and in the route's own comment.
+
+---
+
+## Day 30 (post-MVP) — 2026-09-03
+
+**Commit attribution, again.** 22 commits had landed on `origin/main` since
+this checkout, every one of them authored *and* committed by `Claude
+<noreply@anthropic.com>` with `Co-Authored-By`/`Claude-Session` trailers in
+the message body. This is the fourth recurrence of the same drift (see Days
+19, 21, 23). Fixed the same way: back the pre-rewrite ref up to
+`backup/origin-main-20260903`, rewrite `d701f6e..HEAD` with
+`git filter-branch` setting both identities to `jeraldoalday
+<jeraldoalday@gmail.com>` and stripping the trailers, verify the tree is
+byte-identical to the backup, then force-push with `--force-with-lease`.
+Worth stating plainly since it keeps coming back: this is a *start of
+session* chore, not something to do at the end, because a session that only
+checks its own commits will keep missing the ones parallel sessions pushed.
+
+Also found the local Prisma client was stale — generated before Day 28's
+`lowStockDigestOptOut` migration — so `npm test` reported "24 failed suites,
+84 passed tests" with an exit code of 0, which is a confusing enough
+failure mode to be worth naming. The suites were failing at *type-check*
+time (ts-jest), not at assertion time, so no test actually ran in them.
+`npx prisma generate` fixed it; the real baseline was 353/353.
+
+**Planned:** the Day 29 "Next" list had nothing actionable left on it —
+frontend error reporting is still blocked on there being no external sink
+to report to, and Staff per-location scoping is still waiting on a design
+partner who does not exist yet. So this was a fresh gap sweep, and the gap
+it found was a large one.
+
+**Shipped — F15, stocktakes (physical count reconciliation):**
+
+Every write path in this system explains a *change*: goods arrived, goods
+sold, a box moved between rooms. `InventoryItem.quantity` is derived from
+those movements alone, which is exactly the property PRD §7 calls
+auditability. What none of them explains is a *disagreement* — the shelf
+holding 32 units where the ledger insists there are 35 — and that is the
+single most common thing that actually happens in a shop. Reconciling the
+two meant reading the Inventory screen and posting one-off ADJUSTMENT
+movements product by product, leaving no record that a count had happened
+at all: no scope, no variance total, no answer to "when did we last count
+the back room" or "how much shrinkage did that count find".
+
+- **Schema** (`Stocktake`, `StocktakeLine`, `StocktakeStatus`, migration
+  `20260903090000_add_stocktakes`): a count is scoped to one location,
+  because that is how counting physically works — one person, one room, one
+  list. `StockMovement` gains a nullable `stocktakeId` so the adjustments a
+  count posts are attributable to it rather than looking like a clerk
+  making a dozen unrelated corrections within the same second.
+- **`lib/stocktake.ts`**: sheet generation (two scopes) and the completion
+  maths, kept out of the route because both are decisions that would
+  otherwise be reinvented differently the second time somebody touched
+  them.
+- **`routes/stocktakes.routes.ts`**: eight routes — list, detail, create,
+  edit notes, add line, count line, complete, cancel.
+- **Frontend**: `api/stocktakes.ts`, `pages/StocktakesPage.tsx` (list plus
+  the sheet expanded inline under its row), nav and route wiring.
+- **Seed**: a completed Storefront count and an in-progress Back Room one,
+  so the screen demos as something other than empty.
+
+Three decisions are load-bearing and are commented where they live:
+
+1. **Uncounted is not zero.** `countedQty` is nullable and a line nobody
+   reached is left completely alone at completion. Defaulting it to 0 would
+   make an abandoned half-finished sheet write the rest of the location
+   down to empty — and a half-finished sheet is the *normal* state of a
+   real count, not an edge case. This propagates all the way to the UI:
+   clearing the input sends `null`, not `0`, and the cell reads "Not
+   counted" rather than showing a blank that a reader would take for zero.
+2. **Completion adjusts against live stock, not the sheet's snapshot.**
+   The two are identical unless something moved while the count was open —
+   a sale rung up mid-count, a delivery into the same room. Applying the
+   snapshot variance in that case posts the movement twice: a sheet saying
+   10, a mid-count sale of 2, a counter writing 9, and the naive
+   implementation lands on 7 units where there are 9. Both figures are kept
+   on the line (`expectedQty` versus `appliedDelta`) so the discrepancy
+   stays visible instead of collapsing into one number that explains
+   neither. There is a test for exactly this scenario.
+3. **One open count per location**, refused with a 409. Two overlapping
+   sheets for one room means two people recording different numbers for the
+   same shelf, and whichever is completed second silently overwrites the
+   first with nothing to tell either of them it happened.
+
+RBAC follows the existing persona split rather than inventing one: opening
+a count and filling it in is Staff work, the same way receiving a delivery
+is (PRD §4). Completing or cancelling one is Owner-only, because applying a
+variance is the moment shrinkage is written off against stock value — an
+accounting act, not a warehouse one. The UI hides the buttons Staff do not
+have rather than letting them 403.
+
+**Shipped — the movements table stops printing raw cuids at people.** A
+completed count stamps `reason: "Stocktake <id>"` on every adjustment it
+posts, which is right for the database and unreadable in a table cell. The
+id is already on the row as `stocktakeId`, so `components/movementReason.ts`
+turns that into a "Stock count" tag and drops the redundant text, while
+passing every hand-typed reason through untouched. Extracted as a pure
+function with its own tests, same shape as `emptyListMessage.ts`.
+
+**Seed ordering, the one subtle thing.** Counts are recorded *before* the
+`InventoryItem` rows are written, so the corrections a completed count
+posts fold into the settled totals. Written the other way round the demo
+would ship with a ledger disagreeing with its own movement history, which
+is the one invariant this system rests on — and the pre-existing seed test
+asserting exactly that ("keeps the inventory cache equal to the sum of the
+movements it wrote") is what would have caught it. `SeedSummary.counts
+.stockMovements` also stopped being `history.movements.length` and is now
+read back from the store, since the simulation is no longer the only thing
+writing movements.
+
+**Docs:** PRD §6 gains the F15 row and the reasoning above; §12's open
+Staff-scoping question now records that F15 is the first feature where the
+answer would change something concrete (a count sheet is inherently
+per-location), while shipping unscoped rather than pre-empting it.
+`docs/DEMO.md` gains a walkthrough step and has its quoted figures
+corrected — the seed now writes 1,640 movements and $2,736.35 of stock,
+because a completed count posts three real adjustments of its own — and is
+honestly relabelled a 15-minute walkthrough rather than the 10 it claimed
+at v1 sign-off and has not been for several days.
+
+**Verified (all three services):** backend `npx tsc --noEmit`, `tsc --noEmit
+-p tsconfig.seed.json`, `npm run lint`, full Jest suite (391/391, up from
+353 — 32 new stocktake route tests and 6 new seed tests); frontend `npm run
+lint`, `tsc -b`, `npm test` (419/419, up from 390 — 24 StocktakesPage and 5
+movementReason), `npm run build`; python-service untouched this session.
+
+**Next:**
+
+1. **CSV export of a count sheet.** The thing an actual shop does is print
+   the sheet, walk the aisle with a pen, and type the numbers in
+   afterwards. Everything needed is already there (the Python service owns
+   CSV generation, and `ReportsPage` already has a working download path),
+   but it wants the `URL.createObjectURL` stub currently local to
+   `ReportsPage.test.tsx` promoted to shared test setup — which is the
+   second caller Day 29 said would justify moving it.
+2. **A stocktake history panel on the product screen.** "When was this last
+   counted, and what did the count find" is answerable from the data now
+   but not visible anywhere.
+3. Still open, unchanged: frontend error reporting (no external sink), and
+   Staff per-location scoping (no design partner) — see §12 above for what
+   F15 changes about the latter.
+
+**Blockers/decisions carried forward:**
+
+- None new. The completion-against-live-stock rule has a real cost worth
+  restating: a count submitted long after it was physically taken will
+  overwrite anything that legitimately happened in between. That is the
+  conventional behaviour and the one that stays correct under concurrent
+  movement, but it is a trade, not a free win, and `appliedDelta` diverging
+  from `countedQty - expectedQty` is the signal that it bit.

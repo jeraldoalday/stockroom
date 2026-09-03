@@ -14,6 +14,7 @@ import inventoryRoutes from "./routes/inventory.routes";
 import stockMovementsRoutes from "./routes/stockMovements.routes";
 import purchaseOrdersRoutes from "./routes/purchaseOrders.routes";
 import salesOrdersRoutes from "./routes/salesOrders.routes";
+import stocktakesRoutes from "./routes/stocktakes.routes";
 import dashboardRoutes from "./routes/dashboard.routes";
 import reportsRoutes from "./routes/reports.routes";
 import usersRoutes from "./routes/users.routes";
@@ -41,6 +42,7 @@ export function createApp() {
   app.use("/api/stock-movements", stockMovementsRoutes);
   app.use("/api/purchase-orders", purchaseOrdersRoutes);
   app.use("/api/sales-orders", salesOrdersRoutes);
+  app.use("/api/stocktakes", stocktakesRoutes);
   app.use("/api/dashboard", dashboardRoutes);
   app.use("/api/reports", reportsRoutes);
   app.use("/api/users", usersRoutes);

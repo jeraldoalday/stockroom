@@ -1,6 +1,9 @@
 # StockRoom demo script
 
-A 10-minute walkthrough of the v1 MVP against the seeded demo data. Every
+A 15-minute walkthrough of the v1 MVP, plus the post-v1 features, against
+the seeded demo data. It was 10 minutes at v1 sign-off and has grown with
+what shipped since; the section timings below are per-step, so drop step 4
+or step 8 if you have less time than that. Every
 number quoted below is real: the seed is deterministic (a fixed PRNG, not
 `Math.random()`), so these figures are the same on every machine and will
 still be right next month.
@@ -43,10 +46,13 @@ Northside Grocery, a small shop with 60 days of trading behind it:
 
 - 3 locations (Storefront, Back Room, Overflow Warehouse), 6 categories,
   26 products, 4 suppliers, 5 customers
-- 1,637 stock movements — 1,422 sales, 196 receipts, 19 adjustments
+- 1,640 stock movements — 1,422 sales, 196 receipts, 22 adjustments (3 of
+  those posted by a completed stocktake)
 - 4 purchase orders, one in each status; 4 sales orders covering draft,
   fulfilled and cancelled
-- $2,735.05 of stock on hand at cost
+- 2 stocktakes: a completed Storefront count from 6 days ago, and a Back
+  Room count still in progress
+- $2,736.35 of stock on hand at cost
 - 4 products at or below their reorder point, 22 comfortably stocked; two of
   those 22 have never sold a single unit, which is what the dead-stock
   report is for
@@ -59,7 +65,7 @@ Sign in as **owner@northside.test**.
 
 Three stat cards, then two panels:
 
-- **Total stock value $2,735.05** — quantity on hand × cost, across every
+- **Total stock value $2,736.35** — quantity on hand × cost, across every
   location. This card is the one Staff never see.
 - **Low stock (4)** — the panel below lists them, lowest first: Mature
   Cheddar 400g, Ground Coffee 500g, Laundry Powder 2kg and Mixed Nuts 300g
@@ -80,10 +86,12 @@ ever edits a quantity directly (PRD section 7). Filter by product to
 **Butter Croissant** and step through the pages — receipts and sales
 alternating as the shop restocks and sells down.
 
-Filter by type to **Adjusted** to find the 11 shrinkage entries: "Damaged in
-handling", "Expired — written off". Adjustments are the one movement type
-where a reason is mandatory, because they're the only ones with no
-document behind them.
+Filter by type to **Adjusted** to find the 22 entries: 11 "Damaged in
+handling", 8 "Expired — written off", and 3 tagged **Stock count** — those
+last three came from the stocktake in step 4 rather than from anyone
+editing stock by hand. Adjustments are the one movement type where a
+reason is mandatory, because they're the only ones with no document behind
+them; a count supplies its own.
 
 Then record one live:
 
@@ -110,7 +118,49 @@ The **Corner Street Bakery** order is still a draft: it has no effect on
 stock at all until it's marked as ordered and received. That distinction is
 what makes "stock on order" different from "stock on hand".
 
-### 4. Reports — the Python service (F10, F11, F12, F13) (2 min)
+### 4. Stocktakes — counting the shelf (F15) (3 min)
+
+Go to **Stocktakes**. Two counts, and they show the two halves of the
+feature.
+
+The **Storefront** count under *Completed* is finished. Open its sheet: the
+expected column is what the ledger believed when the sheet was generated,
+the counted column is what somebody actually found, and the variance column
+is what was posted. Three units of bananas and two croissants had gone
+missing; one line agreed exactly and says **Matches** rather than showing a
+bare zero; one line found four more units than the system thought existed.
+The last line was never counted at all, and reads **Not counted** — nothing
+was done to that product's stock.
+
+That distinction is the one to dwell on. "Counted zero" writes the shelf
+down to empty; "not counted" leaves it entirely alone. A half-finished
+count sheet is the normal state of a real one, and treating a blank as a
+zero would be catastrophic rather than merely wrong.
+
+The **Back Room** count under *In progress* is live. Type a figure into a
+box and tab out — it saves on blur, and the variance appears immediately.
+Clear the box again and it goes back to *Not counted*, not to zero. Use
+**Found something not on the sheet?** to add a product the sheet never
+listed, which is how goods sitting somewhere the ledger thinks is empty
+get recorded at all.
+
+Then **Complete count and adjust stock**. The banner reports what it did —
+lines counted, lines corrected, units found and lost — and Inventory and
+the Dashboard move with it. Go back to Stock Movements and the corrections
+are there, tagged **Stock count**, each one an ordinary immutable movement
+row like everything else in this system.
+
+Two things to try if asked:
+
+- Start a second count for the same location while one is open. The API
+  refuses it: two sheets for one room means two people writing different
+  numbers for the same shelf, and whichever is completed second silently
+  overwrites the first.
+- Sign in as the clerk (step 6). Staff can start a count and fill it in —
+  it is warehouse work — but the Complete button is not there. Applying a
+  count is when shrinkage hits stock value.
+
+### 5. Reports — the Python service (F10, F11, F12, F13) (2 min)
 
 Go to **Reports**. Everything here is computed by the FastAPI service
 reading the same database, proxied through the Node API — the browser never
@@ -136,7 +186,7 @@ talks to it directly.
   which is the "switching from spreadsheets is painless" claim in PRD
   section 3, goal 6.
 
-### 5. Permissions — the Staff view (F2) (2 min)
+### 6. Permissions — the Staff view (F2) (2 min)
 
 Sign out and back in as **clerk@northside.test**.
 
@@ -158,7 +208,7 @@ technical — the fields are simply absent.
 Staff can still do the job: record movements, receive stock, fulfil sales
 orders. It's margin they can't see.
 
-### 6. Sales orders — the over-sell guard (F7) (1 min)
+### 7. Sales orders — the over-sell guard (F7) (1 min)
 
 Go to **Sales Orders** and create a draft for the Storefront selling more
 Mature Cheddar than is on hand there — it's one of the stocked-out products
@@ -170,7 +220,7 @@ goes negative.
 Then fulfil a normal in-stock order and watch Inventory drop by exactly the
 line quantity.
 
-### 7. Multi-tenancy — the boundary (F1) (1 min)
+### 8. Multi-tenancy — the boundary (F1) (1 min)
 
 Sign up a brand-new organization from `/signup` in a second tab. Its
 dashboard is completely empty while Northside Grocery, still open in the

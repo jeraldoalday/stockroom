@@ -5,7 +5,7 @@ tracking, purchase & sales orders, low-stock alerts, and reporting.
 
 - [`docs/PRD.md`](docs/PRD.md) — product spec
 - [`docs/PROGRESS.md`](docs/PROGRESS.md) — daily build log
-- [`docs/DEMO.md`](docs/DEMO.md) — 10-minute walkthrough of the seeded demo
+- [`docs/DEMO.md`](docs/DEMO.md) — 15-minute walkthrough of the seeded demo
 - [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — running it somewhere real, and
   what isn't production-ready yet
 

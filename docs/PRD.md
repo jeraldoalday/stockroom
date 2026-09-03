@@ -80,6 +80,7 @@ by `organizationId` at the middleware layer, never trusted from the client.
 | F12 | Simple reorder-quantity suggestion (moving-average demand) | P2 | Shipped (day 12) |
 | F13 | Dead-stock report: products holding stock that isn't selling, valued at cost | P2 | Shipped (day 18) |
 | F14 | Low-stock email digest: daily push to Owners, not just the dashboard pull | P2 | Shipped (day 27) |
+| F15 | Stocktake: count a location physically, and reconcile the ledger to it | P2 | Shipped (day 30) |
 
 All twelve MVP requirements are implemented end to end (API, UI, and tests);
 F13-F14 are post-v1 additions rather than part of that scope. "Top movers"
@@ -99,6 +100,43 @@ has no effect on Staff, who were never sent one. Still no de-duplication
 across days, by design: a daily digest that always reports what's currently
 low is simple to reason about, and cron's own schedule is what keeps it to
 once a day rather than the app tracking "was this already reported" state.
+
+F15 closes a hole that F4's audit trail made easy to overlook. Every other
+write path in the system explains a *change* — goods arrived, goods sold, a
+box moved between rooms — and quantity on hand is derived from those
+movements alone. None of them explains a *disagreement*: the shelf holding
+32 units where the ledger insists there are 35. Reconciling the two meant
+reading the Inventory screen and posting one-off adjustments product by
+product, which left no record that a count had happened at all — no scope,
+no variance total, and no way to answer "when did we last count the back
+room" or "how much shrinkage did that count find".
+
+A stocktake is scoped to one location, because that is how counting
+physically works: one person walks one room with one list. The sheet is
+generated either from the products the ledger believes are there (the
+everyday cycle count) or from every active product (which is the only way
+to find goods sitting somewhere the system thinks is empty). Lines can be
+added mid-count for anything the sheet did not predict.
+
+Two decisions in it are worth recording:
+
+- **Uncounted is not zero.** `countedQty` is nullable, and a line nobody
+  reached is left completely alone at completion. Defaulting it to 0 would
+  make an abandoned half-finished count write the rest of the location
+  down to empty.
+- **Completion adjusts against live stock, not the sheet's snapshot.**
+  The two are identical unless something moved while the count was open —
+  a sale rung up mid-count, a delivery received into the same room — and
+  applying the snapshot variance in that case would post the movement
+  twice. Both figures are kept on the line (`expectedQty` and
+  `appliedDelta`) so the discrepancy stays visible rather than being
+  collapsed into one number that explains neither.
+
+Opening and filling in a count is Staff work, the same way receiving a
+delivery is. Completing one is Owner-only: that is the moment shrinkage is
+written off against stock value, which is an accounting act rather than a
+warehouse one, and the same reasoning §4 uses to keep cost data away from
+Staff in the first place.
 
 ## 7. Non-functional requirements
 
@@ -183,7 +221,11 @@ session updates `docs/PROGRESS.md` with what shipped and what's next.
   so the choice is reversible.
 - Whether STAFF role needs per-location scoping — revisit after first
   design partner feedback. Still open; no design partner yet, and not
-  needed for any MVP requirement.
+  needed for any MVP requirement. F15 (day 30) is the first feature where
+  the answer would change something concrete: a count sheet is inherently
+  per-location, so a scoped Staff member would see only the counts for
+  rooms they work in. The feature ships unscoped, consistent with every
+  other screen, rather than pre-empting the decision.
 
 ## 13. v1 sign-off (Day 14)
 

@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { Fragment, useId, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
@@ -13,6 +13,7 @@ import {
 } from "../api/products";
 import type { ImportProductsResult, ProductStatusFilter } from "../api/products";
 import { createCategory, fetchCategories } from "../api/categories";
+import { fetchStocktakeHistory } from "../api/stocktakes";
 import type { Product } from "../api/types";
 import { isApiError } from "../api/errors";
 import { emptyListMessage } from "../components/emptyListMessage";
@@ -37,6 +38,86 @@ function centsToInput(cents: number | undefined): string | undefined {
   return cents === undefined ? undefined : (cents / 100).toFixed(2);
 }
 
+/**
+ * "When was this last counted, and what did the count find" — answerable
+ * from the stocktake data since Day 30, but nowhere on the product screen
+ * until now. Only counted lines ever show up here (see /stocktakes/history
+ * on the backend); a product that has never been on a finished count shows
+ * the empty state below rather than an uncounted row that would say nothing.
+ */
+function ProductHistoryPanel({ productId }: { productId: string }) {
+  const [page, setPage] = useState(1);
+  const historyQuery = useQuery({
+    queryKey: ["stocktake-history", productId, page],
+    queryFn: () => fetchStocktakeHistory(productId, page),
+  });
+
+  if (historyQuery.isLoading) {
+    return <div className="px-4 py-3 text-xs text-gray-500">Loading count history...</div>;
+  }
+  if (historyQuery.isError || !historyQuery.data) {
+    return (
+      <div role="alert" className="px-4 py-3 text-xs text-red-600">
+        Failed to load count history.
+      </div>
+    );
+  }
+
+  const items = historyQuery.data.items;
+  if (items.length === 0) {
+    return (
+      <div className="px-4 py-3 text-xs text-gray-500">
+        This product has never been on a counted stocktake line.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3 px-4 py-3">
+      <table className="min-w-full text-xs">
+        <thead>
+          <tr className="text-gray-500">
+            <th scope="col" className="py-1 text-left">Counted</th>
+            <th scope="col" className="py-1 text-left">Location</th>
+            <th scope="col" className="py-1 text-right">Expected</th>
+            <th scope="col" className="py-1 text-right">Counted qty</th>
+            <th scope="col" className="py-1 text-right">Applied</th>
+            <th scope="col" className="py-1 text-left">Sheet status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((entry) => (
+            <tr key={entry.stocktakeId}>
+              <td className="py-1">{entry.countedAt ? new Date(entry.countedAt).toLocaleDateString() : "—"}</td>
+              <td className="py-1 text-gray-500">{entry.location?.name ?? "—"}</td>
+              <td className="py-1 text-right text-gray-500">{entry.expectedQty}</td>
+              <td className="py-1 text-right">{entry.countedQty}</td>
+              <td className="py-1 text-right">
+                {entry.appliedDelta === null ? (
+                  <span className="text-gray-400">Not applied yet</span>
+                ) : (
+                  <span className={entry.appliedDelta === 0 ? "text-gray-500" : entry.appliedDelta > 0 ? "text-green-700" : "text-red-600"}>
+                    {entry.appliedDelta > 0 ? "+" : ""}
+                    {entry.appliedDelta}
+                  </span>
+                )}
+              </td>
+              <td className="py-1 text-gray-500">{entry.status}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <Pagination
+        page={historyQuery.data.page}
+        pageSize={historyQuery.data.pageSize}
+        total={historyQuery.data.total}
+        onPageChange={setPage}
+        label="counts"
+      />
+    </div>
+  );
+}
+
 export function ProductsPage() {
   // One stable prefix per mounted page, so every label points at its
   // own control even where two forms reuse a field name.
@@ -59,6 +140,7 @@ export function ProductsPage() {
   const [importing, setImporting] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [categoryError, setCategoryError] = useState<string | null>(null);
+  const [historyExpandedId, setHistoryExpandedId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const editing = formTarget !== null && formTarget !== "new" ? formTarget : null;
@@ -419,55 +501,75 @@ export function ProductsPage() {
               </tr>
             )}
             {productsQuery.data?.items.map((product) => (
-              <tr key={product.id} className={product.isActive ? undefined : "bg-gray-50 text-gray-500"}>
-                <td className="px-4 py-2 font-mono text-xs">{product.sku}</td>
-                <td className="px-4 py-2">
-                  {product.name}
-                  {!product.isActive && (
-                    <span className="ml-2 rounded-full bg-gray-200 px-2 py-0.5 text-xs font-medium text-gray-600">
-                      Archived
-                    </span>
-                  )}
-                </td>
-                <td className="px-4 py-2 text-gray-500">{product.category?.name ?? "—"}</td>
-                <td className="px-4 py-2 text-right">{formatCents(product.priceCents)}</td>
-                <td className="px-4 py-2 text-right">{product.reorderPoint}</td>
-                <td className="px-4 py-2 text-right">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setFormError(null);
-                      setFormTarget(product);
-                    }}
-                    className="text-xs text-brand-600 hover:underline"
-                  >
-                    Edit
-                  </button>
-                  {product.isActive ? (
+              // A Fragment with a key, not `<>`: the shorthand cannot carry
+              // one, and each row here expands into two sibling <tr>s.
+              <Fragment key={product.id}>
+                <tr className={product.isActive ? undefined : "bg-gray-50 text-gray-500"}>
+                  <td className="px-4 py-2 font-mono text-xs">{product.sku}</td>
+                  <td className="px-4 py-2">
+                    {product.name}
+                    {!product.isActive && (
+                      <span className="ml-2 rounded-full bg-gray-200 px-2 py-0.5 text-xs font-medium text-gray-600">
+                        Archived
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-gray-500">{product.category?.name ?? "—"}</td>
+                  <td className="px-4 py-2 text-right">{formatCents(product.priceCents)}</td>
+                  <td className="px-4 py-2 text-right">{product.reorderPoint}</td>
+                  <td className="px-4 py-2 text-right">
                     <button
                       type="button"
                       onClick={() => {
-                        setRowError(null);
-                        pendingArchive.request(product);
+                        setFormError(null);
+                        setFormTarget(product);
                       }}
-                      className="ml-3 text-xs text-red-600 hover:underline"
+                      className="text-xs text-brand-600 hover:underline"
                     >
-                      Archive
+                      Edit
                     </button>
-                  ) : (
                     <button
                       type="button"
-                      onClick={() => {
-                        setRowError(null);
-                        restoreMutation.mutate(product.id);
-                      }}
+                      onClick={() =>
+                        setHistoryExpandedId((current) => (current === product.id ? null : product.id))
+                      }
                       className="ml-3 text-xs text-brand-600 hover:underline"
                     >
-                      Restore
+                      {historyExpandedId === product.id ? "Hide history" : "Count history"}
                     </button>
-                  )}
-                </td>
-              </tr>
+                    {product.isActive ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRowError(null);
+                          pendingArchive.request(product);
+                        }}
+                        className="ml-3 text-xs text-red-600 hover:underline"
+                      >
+                        Archive
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRowError(null);
+                          restoreMutation.mutate(product.id);
+                        }}
+                        className="ml-3 text-xs text-brand-600 hover:underline"
+                      >
+                        Restore
+                      </button>
+                    )}
+                  </td>
+                </tr>
+                {historyExpandedId === product.id && (
+                  <tr>
+                    <td colSpan={6} className="bg-gray-50 p-0">
+                      <ProductHistoryPanel productId={product.id} />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             ))}
           </tbody>
         </table>

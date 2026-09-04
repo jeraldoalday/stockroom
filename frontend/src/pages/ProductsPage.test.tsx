@@ -316,6 +316,86 @@ describe("ProductsPage archive/restore", () => {
   });
 });
 
+describe("ProductsPage count history", () => {
+  it("is closed by default, and does not fetch until opened", async () => {
+    api.on("GET", "/products", page([widget]));
+    renderPage();
+    await screen.findByText("Widget");
+
+    expect(api.requestsFor("GET", "/stocktakes/history")).toHaveLength(0);
+  });
+
+  it("shows what past counts found once opened", async () => {
+    api.on("GET", "/products", page([widget]));
+    api.on(
+      "GET",
+      "/stocktakes/history",
+      ok({
+        items: [
+          {
+            stocktakeId: "s1",
+            status: "COMPLETED",
+            location: { id: "l1", name: "Main Warehouse", address: null, isDefault: true, isActive: true },
+            expectedQty: 10,
+            countedQty: 7,
+            appliedDelta: -3,
+            countedAt: "2026-09-01T09:00:00.000Z",
+            countedBy: { id: "u1", name: "Owner", email: "owner@shop.test" },
+          },
+        ],
+        total: 1,
+        page: 1,
+        pageSize: 25,
+      })
+    );
+    const { user } = renderPage();
+    await screen.findByText("Widget");
+
+    await user.click(screen.getByRole("button", { name: "Count history" }));
+
+    expect(await screen.findByText("Main Warehouse")).toBeInTheDocument();
+    expect(screen.getByText("-3")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(api.requestsFor("GET", "/stocktakes/history")[0].params).toMatchObject({ productId: "p1", page: 1 });
+    });
+  });
+
+  it("explains that the product has never been counted, rather than an empty table", async () => {
+    api.on("GET", "/products", page([widget]));
+    api.on("GET", "/stocktakes/history", ok({ items: [], total: 0, page: 1, pageSize: 25 }));
+    const { user } = renderPage();
+    await screen.findByText("Widget");
+
+    await user.click(screen.getByRole("button", { name: "Count history" }));
+
+    expect(await screen.findByText(/never been on a counted stocktake line/i)).toBeInTheDocument();
+  });
+
+  it("reports a failed history load", async () => {
+    api.on("GET", "/products", page([widget]));
+    api.on("GET", "/stocktakes/history", fail(500));
+    const { user } = renderPage();
+    await screen.findByText("Widget");
+
+    await user.click(screen.getByRole("button", { name: "Count history" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/failed to load count history/i);
+  });
+
+  it("toggles closed again on a second click", async () => {
+    api.on("GET", "/products", page([widget]));
+    api.on("GET", "/stocktakes/history", ok({ items: [], total: 0, page: 1, pageSize: 25 }));
+    const { user } = renderPage();
+    await screen.findByText("Widget");
+
+    await user.click(screen.getByRole("button", { name: "Count history" }));
+    await screen.findByText(/never been on a counted stocktake line/i);
+    await user.click(screen.getByRole("button", { name: "Hide history" }));
+
+    expect(screen.queryByText(/never been on a counted stocktake line/i)).not.toBeInTheDocument();
+  });
+});
+
 describe("ProductsPage CSV import", () => {
   function fileInput(container: HTMLElement): HTMLInputElement {
     return container.querySelector('input[type="file"]') as HTMLInputElement;

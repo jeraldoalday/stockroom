@@ -289,3 +289,22 @@ export interface StocktakeListResponse {
   page: number;
   pageSize: number;
 }
+
+/** One past count of a single product, across whichever sheet it was on. */
+export interface StocktakeHistoryEntry {
+  stocktakeId: string;
+  status: StocktakeStatus;
+  location: Location | null;
+  expectedQty: number;
+  countedQty: number | null;
+  appliedDelta: number | null;
+  countedAt: string | null;
+  countedBy: MovementActor | null;
+}
+
+export interface StocktakeHistoryResponse {
+  items: StocktakeHistoryEntry[];
+  total: number;
+  page: number;
+  pageSize: number;
+}

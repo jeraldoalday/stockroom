@@ -1,5 +1,11 @@
 import { apiClient } from "./client";
-import type { Stocktake, StocktakeListResponse, StocktakeScope, StocktakeStatus } from "./types";
+import type {
+  Stocktake,
+  StocktakeHistoryResponse,
+  StocktakeListResponse,
+  StocktakeScope,
+  StocktakeStatus,
+} from "./types";
 
 export interface StocktakeQuery {
   status?: StocktakeStatus;
@@ -56,6 +62,12 @@ export async function completeStocktake(id: string): Promise<Stocktake> {
 
 export async function cancelStocktake(id: string): Promise<Stocktake> {
   const res = await apiClient.post<Stocktake>(`/stocktakes/${id}/cancel`);
+  return res.data;
+}
+
+/** "When was this product last counted, and what did the count find" — used by ProductsPage's history panel. */
+export async function fetchStocktakeHistory(productId: string, page = 1): Promise<StocktakeHistoryResponse> {
+  const res = await apiClient.get<StocktakeHistoryResponse>("/stocktakes/history", { params: { productId, page } });
   return res.data;
 }
 

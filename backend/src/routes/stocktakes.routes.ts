@@ -86,6 +86,80 @@ router.get(
   })
 );
 
+const historyQuerySchema = z.object({
+  productId: z.string(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(25),
+});
+
+// Registered ahead of GET /:id, or "/history" would itself be swallowed as
+// an :id lookup.
+//
+// "When was this last counted, and what did the count find" for one
+// product, across every sheet that has ever counted it -- the answer
+// StocktakeLine already holds but nothing surfaces (see the product
+// screen's history panel). Only counted lines are history; an uncounted
+// line on some other sheet says nothing about this product.
+router.get(
+  "/history",
+  asyncHandler(async (req, res) => {
+    const query = historyQuerySchema.parse(req.query);
+    const organizationId = req.auth!.organizationId;
+
+    const product = await prisma.product.findFirst({ where: { id: query.productId, organizationId } });
+    if (!product) {
+      throw ApiError.notFound("Product not found");
+    }
+
+    // StocktakeLine carries no organizationId of its own -- a line only
+    // ever belongs to one organization by construction (every route that
+    // creates one scopes the stocktake first), but the tenant filter still
+    // belongs on this query rather than trusted from that alone, the same
+    // rule every other route here follows.
+    const allLines = await prisma.stocktakeLine.findMany({ where: { productId: product.id } });
+    const stocktakeIds = [...new Set(allLines.map((line) => line.stocktakeId))];
+    const stocktakes = stocktakeIds.length
+      ? await prisma.stocktake.findMany({ where: { id: { in: stocktakeIds }, organizationId } })
+      : [];
+    const stocktakeById = new Map(stocktakes.map((s) => [s.id, s]));
+
+    const counted = allLines
+      .filter((line) => line.countedQty !== null && stocktakeById.has(line.stocktakeId))
+      .sort((a, b) => new Date(b.countedAt!).getTime() - new Date(a.countedAt!).getTime());
+
+    const locationIds = [...new Set(counted.map((line) => stocktakeById.get(line.stocktakeId)!.locationId))];
+    const userIds = [...new Set(counted.map((line) => line.countedById).filter((id): id is string => id !== null))];
+    const [locations, users] = await Promise.all([
+      locationIds.length ? prisma.location.findMany({ where: { id: { in: locationIds } } }) : [],
+      userIds.length ? prisma.user.findMany({ where: { id: { in: userIds } }, select: PUBLIC_USER_SELECT }) : [],
+    ]);
+    const locationById = new Map(locations.map((l) => [l.id, l]));
+    const userById = new Map(users.map((u) => [u.id, u]));
+
+    const total = counted.length;
+    const page = counted.slice((query.page - 1) * query.pageSize, query.page * query.pageSize);
+
+    res.json({
+      items: page.map((line) => {
+        const stocktake = stocktakeById.get(line.stocktakeId)!;
+        return {
+          stocktakeId: line.stocktakeId,
+          status: stocktake.status,
+          location: locationById.get(stocktake.locationId) ?? null,
+          expectedQty: line.expectedQty,
+          countedQty: line.countedQty,
+          appliedDelta: line.appliedDelta,
+          countedAt: line.countedAt,
+          countedBy: line.countedById ? userById.get(line.countedById) ?? null : null,
+        };
+      }),
+      total,
+      page: query.page,
+      pageSize: query.pageSize,
+    });
+  })
+);
+
 // The mock Prisma client used in tests doesn't resolve `include`, so the
 // lines and their products are fetched separately rather than nested — the
 // same trade purchaseOrders.routes.ts makes, and it keeps the response

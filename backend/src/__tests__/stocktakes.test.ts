@@ -591,6 +591,99 @@ describe("Stocktakes API", () => {
     });
   });
 
+  describe("count history for one product", () => {
+    function history(token: string, productId: string, params: Record<string, unknown> = {}) {
+      return request(app)
+        .get("/api/stocktakes/history")
+        .query({ productId, ...params })
+        .set("Authorization", `Bearer ${token}`);
+    }
+
+    it("is empty until the product has actually been counted", async () => {
+      const token = await signUpAndGetToken("owner@shop.test", "The Shop");
+      const { locationId, stockedProductId } = await setUp(token);
+      await createStocktake(token, { locationId });
+
+      const res = await history(token, stockedProductId);
+
+      expect(res.status).toBe(200);
+      expect(res.body.items).toEqual([]);
+      expect(res.body.total).toBe(0);
+    });
+
+    it("shows a counted line, with location and who counted it", async () => {
+      const token = await signUpAndGetToken("owner@shop.test", "The Shop");
+      const { locationId, stockedProductId } = await setUp(token);
+      const sheet = await createStocktake(token, { locationId });
+      await countLine(token, sheet.body.id, sheet.body.lines[0].id, 7);
+
+      const res = await history(token, stockedProductId);
+
+      expect(res.body.total).toBe(1);
+      expect(res.body.items[0]).toMatchObject({
+        stocktakeId: sheet.body.id,
+        status: "OPEN",
+        expectedQty: 10,
+        countedQty: 7,
+        appliedDelta: null,
+      });
+      expect(res.body.items[0].location.id).toBe(locationId);
+      expect(res.body.items[0].countedBy.email).toBe("owner@shop.test");
+    });
+
+    it("leaves an uncounted line off the history entirely", async () => {
+      const token = await signUpAndGetToken("owner@shop.test", "The Shop");
+      const { locationId, emptyProductId } = await setUp(token);
+      await createStocktake(token, { locationId, scope: "all-products" });
+
+      // emptyProductId is on the sheet (all-products scope) but nobody has
+      // recorded a figure for it yet.
+      const res = await history(token, emptyProductId);
+
+      expect(res.body.items).toEqual([]);
+    });
+
+    it("carries the applied delta once a count completes", async () => {
+      const token = await signUpAndGetToken("owner@shop.test", "The Shop");
+      const { locationId, stockedProductId } = await setUp(token);
+      const sheet = await createStocktake(token, { locationId });
+      await countLine(token, sheet.body.id, sheet.body.lines[0].id, 7);
+      await request(app).post(`/api/stocktakes/${sheet.body.id}/complete`).set("Authorization", `Bearer ${token}`);
+
+      const res = await history(token, stockedProductId);
+
+      expect(res.body.items[0]).toMatchObject({ status: "COMPLETED", appliedDelta: -3 });
+    });
+
+    it("orders most recently counted first, across two separate sheets", async () => {
+      const token = await signUpAndGetToken("owner@shop.test", "The Shop");
+      const { locationId, stockedProductId } = await setUp(token);
+      const first = await createStocktake(token, { locationId });
+      await countLine(token, first.body.id, first.body.lines[0].id, 9);
+      await request(app).post(`/api/stocktakes/${first.body.id}/complete`).set("Authorization", `Bearer ${token}`);
+
+      const second = await createStocktake(token, { locationId });
+      await countLine(token, second.body.id, second.body.lines[0].id, 9);
+
+      const res = await history(token, stockedProductId);
+
+      expect(res.body.items).toHaveLength(2);
+      expect(res.body.items[0].stocktakeId).toBe(second.body.id);
+      expect(res.body.items[1].stocktakeId).toBe(first.body.id);
+    });
+
+    it("404s for a product from another organization", async () => {
+      const tokenA = await signUpAndGetToken("a@shop.test", "Shop A");
+      const tokenB = await signUpAndGetToken("b@shop.test", "Shop B");
+      const { stockedProductId } = await setUp(tokenA);
+      await setUp(tokenB);
+
+      const res = await history(tokenB, stockedProductId);
+
+      expect(res.status).toBe(404);
+    });
+  });
+
   describe("who is allowed to do what", () => {
     it("lets Staff open a count and fill it in", async () => {
       const ownerToken = await signUpAndGetToken("owner@shop.test", "The Shop");

@@ -20,19 +20,28 @@
 
 \set ON_ERROR_STOP on
 
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'stockroom_readonly') THEN
-    EXECUTE format('CREATE ROLE stockroom_readonly LOGIN PASSWORD %L', :'role_password');
-  ELSE
-    EXECUTE format('ALTER ROLE stockroom_readonly WITH LOGIN PASSWORD %L', :'role_password');
-  END IF;
-END
-$$;
+-- Both statements below go through \gexec rather than a PL/pgSQL DO block:
+-- psql only substitutes :'role_password' in text it parses itself, and it
+-- treats a dollar-quoted DO $$ ... $$ body as an opaque literal, so a
+-- variable referenced inside one is sent to the server as the literal text
+-- ":'role_password'" instead of its value. Building the DDL with format()
+-- in a SELECT and handing it to \gexec keeps the substitution in psql's own
+-- parsing pass, before any dollar-quoting exists to hide it.
+SELECT format('CREATE ROLE stockroom_readonly LOGIN PASSWORD %L', :'role_password')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'stockroom_readonly')
+\gexec
+
+SELECT format('ALTER ROLE stockroom_readonly WITH LOGIN PASSWORD %L', :'role_password')
+WHERE EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'stockroom_readonly')
+\gexec
 
 -- Connect and look, nothing else. Note there is no CREATE on the schema,
--- so the role cannot add tables of its own either.
-GRANT CONNECT ON DATABASE CURRENT_CATALOG TO stockroom_readonly;
+-- so the role cannot add tables of its own either. CURRENT_CATALOG is not
+-- a valid object name in GRANT ON DATABASE (it's an expression keyword, not
+-- an identifier) — current_database() through \gexec is the actual way to
+-- target "whatever database this script is connected to" generically.
+SELECT format('GRANT CONNECT ON DATABASE %I TO stockroom_readonly', current_database())
+\gexec
 GRANT USAGE ON SCHEMA public TO stockroom_readonly;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO stockroom_readonly;
 

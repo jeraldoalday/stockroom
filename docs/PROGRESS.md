@@ -2728,3 +2728,159 @@ movementReason), `npm run build`; python-service untouched this session.
   conventional behaviour and the one that stays correct under concurrent
   movement, but it is a trade, not a free win, and `appliedDelta` diverging
   from `countedQty - expectedQty` is the signal that it bit.
+
+## Day 31 (post-MVP) — 2026-09-04
+
+**Commit attribution, differently this time.** Every prior recurrence of
+this issue (Days 19, 21, 23, 30) ended in the same fix: back up the ref,
+`git filter-branch` the identity to `jeraldoalday <jeraldoalday@gmail.com>`,
+force-push. This session's own operating instructions explicitly replace
+that guidance with a different footer convention (`Co-Authored-By: Claude
+Sonnet 5 <noreply@anthropic.com>` plus a `Claude-Session` trailer), and the
+commit *identity* itself (`Claude <noreply@anthropic.com>`) comes from
+`git config user.name`/`user.email`, set at the environment level, not by
+anything a session does. Given that: this session used the footer it was
+told to use, left the environment's git config untouched (never modify it
+regardless), and did not rewrite already-pushed history to relabel identity
+— that pattern was this session's call to make each time it recurred, and
+today's instructions read as superseding it rather than confirming it.
+Flagging the reasoning explicitly rather than silently breaking the
+four-session streak, in case a future session's instructions say otherwise.
+
+**Planned:** picked up the top of Day 30's "Next" list — CSV export of a
+count sheet, then a stocktake history panel on the product screen — plus
+whatever a fresh gap sweep turned up along the way. Both landed; the sweep
+turned up two real, previously-invisible bugs, both fixed inline with the
+feature that exposed them.
+
+**Shipped — fixed `backend/prisma/sql/readonly_role.sql`, which had never
+actually run:**
+
+Before touching any feature work, set up this sandbox's local Postgres from
+scratch (no role, no database, same as every session that starts with a
+clean container) and ran the read-only-role script `docs/DEPLOYMENT.md`
+names as the actual production procedure for PRD §8's SELECT-only DB role
+— and it failed immediately. Two independent syntax errors, both
+pre-existing since the Day 14 parallel-track merge that introduced this
+file:
+
+1. `:'role_password'` was referenced inside a dollar-quoted `DO $$ ... $$`
+   body. psql only substitutes `:'var'` in text it parses itself, and treats
+   a dollar-quoted block as an opaque literal — the variable reached the
+   server as the literal text `:'role_password'`, a syntax error every time.
+2. `GRANT CONNECT ON DATABASE CURRENT_CATALOG` is invalid: `CURRENT_CATALOG`
+   is an expression keyword usable in a `SELECT` list, not a valid object
+   identifier in a `GRANT ON DATABASE`.
+
+Every session since Day 16 that reported successfully "running the
+readonly-role script" was almost certainly running `db/init/
+01-create-readonly-role.sql` instead (the other, correct, Docker-oriented
+script with a fixed local password and a literal database name) without
+noticing the two scripts had diverged — `docs/DEPLOYMENT.md` has pointed at
+the broken one specifically since Day 14. Rewrote both statements to build
+the DDL with `format()` in a `SELECT` and hand it to `\gexec`, which keeps
+`:'role_password'` substitution inside psql's own parsing pass before any
+dollar-quoting exists to hide it, and swapped `CURRENT_CATALOG` for
+`current_database()` for the same reason. Verified against a real Postgres
+16: the script now runs clean on both its create-role and alter-existing-
+role branches, the resulting role can `SELECT` (including from Day 30's
+brand-new `stocktakes`/`stocktake_lines` tables, proving the default-
+privileges rule still works with no re-grant) and gets "permission denied"
+on `INSERT`, and `python-service`'s `/health` reports `"database":
+"connected"` running against it.
+
+**Shipped — F15 follow-up #1: CSV export of a count sheet.** Generated in
+Node (`lib/csv.ts` gains a `toCsv` writer, the counterpart to the existing
+`parseCsvRecords` parser) rather than proxied through the Python service
+like the other exports — those are organization-wide reports that are
+naturally SQL-shaped, which is why pandas-on-Python fits them, while a
+count sheet is a single-record detail export whose shaping (the
+nullable-vs-zero `countedQty` rule, the applied-delta-vs-sheet-variance
+rule, the product-name sort) already lives entirely in
+`loadStocktakeWithLines`; re-deriving that in a second raw-SQL query on the
+Python side would risk the two quietly disagreeing, the same trap the
+trend/reorder-suggestion sign convention hit on Day 12. `GET /api/
+stocktakes/:id/export` works at any status — an OPEN sheet is exactly what
+gets printed and carried into the aisle, a COMPLETED one is the record of
+what a count found. Frontend: an "Export CSV" button on the sheet, and
+(per Day 30's own note) the `URL.createObjectURL`/`revokeObjectURL` jsdom
+stub was promoted from a local block in `ReportsPage.test.tsx` into shared
+`test/setup.ts` now that a second CSV-download test file exists.
+
+**Found and fixed a real cross-origin bug while browser-verifying the
+export:** `Content-Disposition` is not on the CORS response-header
+safelist, so a cross-origin `fetch()` (the Vite dev origin calling the API
+origin — the same shape as any real deploy) could read the CSV body but
+never see the filename the server chose, silently falling back to a
+generic `stocktake-<id>.csv` in the browser despite the server sending the
+right one. Invisible to every automated test, because the frontend suite's
+mocked axios adapter can't see CORS behaviour at all — caught only by
+driving the actual button through a real cross-origin Chromium session
+with Playwright and inspecting `download.suggested_filename` before and
+after. Fixed with `exposedHeaders: ["Content-Disposition"]` on the app's
+`cors()` config, plus a backend test asserting the response actually
+carries `Access-Control-Expose-Headers`, since nothing else would catch a
+regression here.
+
+**Shipped — F15 follow-up #2: stocktake history on the product screen.**
+`GET /api/stocktakes/history?productId=` returns every counted line for one
+product, most-recent-first, across every sheet — open or completed — that
+has ever counted it; an uncounted line on some other sheet isn't history
+and is left out. `StocktakeLine` carries no `organizationId` of its own, so
+the tenant filter is asserted directly against `stocktake.organizationId`
+in the join rather than trusted transitively from the already-org-scoped
+`productId` lookup — same discipline every other route in this file
+follows. Frontend: `ProductsPage` gets the same expandable-row pattern
+`StocktakesPage`/`PurchaseOrdersPage` already use ("Count history" / "Hide
+history"), rendering counted-at, location, expected vs. counted, the
+applied delta (or "Not applied yet" while the sheet is still open), and the
+sheet's status.
+
+**Verified beyond the test suite, against real Postgres + all three
+services:** created a product, received 25 units, counted it at 22 (a
+short find), exported the still-open sheet and confirmed the CSV read
+`Expected 25, Counted 22, Variance -3, Counted by Owner`; completed the
+count and exported again, confirming the completed export still reads the
+correct applied delta. Drove the actual "Export CSV" button through a real
+cross-origin Chromium session (Playwright) both before and after the CORS
+fix, confirming the downloaded filename went from the generic fallback to
+`stocktake-main-location-2026-09-04.csv`. Then opened the same product's
+"Count history" panel through a real browser and confirmed it rendered that
+exact counted-then-completed row (date, location, 25, 22, -3, COMPLETED),
+plus the "never been on a counted stocktake line" empty state for a product
+with no history.
+
+**Verified (all three services):** backend `npx tsc --noEmit`, `npm run
+lint`, full Jest suite (408/408, up from 391 — 4 stocktake-export tests, 1
+CORS-header test, 6 stocktake-history tests, 6 `toCsv` tests); frontend
+`npm run lint`, `tsc -b`, `npm test` (427/427, up from 419 — 3 export
+tests, 5 history-panel tests), `npm run build`; python-service `python3 -m
+pytest -q` (47/47, unaffected — no python-service file changed this
+session).
+
+**Next:**
+
+1. Still open, low urgency: frontend error reporting (no external sink to
+   report to) and Staff per-location scoping (no design partner) — both
+   unchanged since Day 28/29/30, neither newly actionable this session.
+2. Worth a look next time: whether any other Node route reads a response
+   header the frontend depends on cross-origin — this session found exactly
+   one (`Content-Disposition` on the stocktake export) by accident, while
+   verifying a specific feature in a real browser rather than through the
+   mocked test suite, which can't see CORS behaviour at all. No sweep of
+   every route for the same class of bug has happened yet.
+3. `docs/DEPLOYMENT.md` should probably get a line noting the two
+   readonly-role scripts' history (why two exist, which is which) — not
+   done this session since it felt like scope creep on top of the actual
+   fix, but the confusion that let the broken one go unnoticed for 18 days
+   is exactly the kind of thing a doc note prevents next time.
+
+**Blockers/decisions carried forward:**
+
+- None new beyond the commit-attribution note above. The read-only-role fix
+  is the second time this file's own "verified this" claims turned out to
+  be about a different file than the one actually being verified (the first
+  was the Jest-mock double-registration bug from the Day 14 parallel
+  track) — worth remembering that a `docs/PROGRESS.md` claim of "ran X and
+  it worked" is only as trustworthy as whether X was actually the thing on
+  disk at the path being described.

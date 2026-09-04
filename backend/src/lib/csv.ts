@@ -78,3 +78,24 @@ export function parseCsvRecords(text: string): Record<string, string>[] {
     return record;
   });
 }
+
+// Quotes a field only when it needs it (RFC 4180: contains a comma, a
+// quote, or a newline), escaping an embedded quote as "". Everything else
+// -- the common case for the numbers and short names this app writes --
+// passes through unquoted rather than wrapping every field defensively.
+function formatCsvField(value: string): string {
+  if (/[",\r\n]/.test(value)) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
+/**
+ * Writes rows (each including its own header as the first row) into a CSV
+ * string. The counterpart to `parseCsvRecords` above, for the one export
+ * that isn't a good fit for the Python service's pandas-based ones: see
+ * `stocktakes.routes.ts`'s `/:id/export`.
+ */
+export function toCsv(rows: string[][]): string {
+  return rows.map((row) => row.map(formatCsvField).join(",")).join("\r\n") + "\r\n";
+}

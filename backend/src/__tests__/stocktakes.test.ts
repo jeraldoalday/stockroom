@@ -500,6 +500,97 @@ describe("Stocktakes API", () => {
     });
   });
 
+  describe("exporting a count sheet as CSV", () => {
+    function exportSheet(token: string, id: string) {
+      return request(app).get(`/api/stocktakes/${id}/export`).set("Authorization", `Bearer ${token}`);
+    }
+
+    it("prints an in-progress sheet: expected, but nothing counted yet", async () => {
+      const token = await signUpAndGetToken("owner@shop.test", "The Shop");
+      const { locationId } = await setUp(token);
+      const sheet = await createStocktake(token, { locationId });
+
+      const res = await exportSheet(token, sheet.body.id);
+
+      expect(res.status).toBe(200);
+      expect(res.headers["content-type"]).toMatch(/^text\/csv/);
+      expect(res.headers["content-disposition"]).toMatch(/^attachment; filename="stocktake-.*\.csv"$/);
+      const lines = res.text.trim().split("\r\n");
+      expect(lines[0]).toBe("SKU,Product,Expected,Counted,Variance,Counted by,Counted at");
+      // Not counted is a blank field, not "0" — the same rule the on-screen
+      // sheet enforces, so a printed-then-reopened sheet can't be misread.
+      expect(lines[1]).toBe("SKU-STOCKED,Apple Sauce,10,,,,");
+    });
+
+    it("shows what a counter found, and the variance against the sheet", async () => {
+      const token = await signUpAndGetToken("owner@shop.test", "The Shop");
+      const { locationId } = await setUp(token);
+      const sheet = await createStocktake(token, { locationId });
+      await countLine(token, sheet.body.id, sheet.body.lines[0].id, 7);
+
+      const res = await exportSheet(token, sheet.body.id);
+
+      const [, row] = res.text.trim().split("\r\n");
+      const fields = row.split(",");
+      expect(fields.slice(0, 6)).toEqual(["SKU-STOCKED", "Apple Sauce", "10", "7", "-3", "Owner"]);
+      // Counted at is a real timestamp once a figure has been recorded.
+      expect(fields[6]).not.toBe("");
+    });
+
+    it("uses the applied delta, not the sheet variance, once a count is completed", async () => {
+      const token = await signUpAndGetToken("owner@shop.test", "The Shop");
+      const { locationId, stockedProductId } = await setUp(token);
+      const sheet = await createStocktake(token, { locationId });
+      await countLine(token, sheet.body.id, sheet.body.lines[0].id, 7);
+
+      // Stock moves after the counter wrote 7 down but before the sheet is
+      // completed -- the same scenario `applyStocktake` itself is built
+      // around (see lib/stocktake.ts).
+      await request(app)
+        .post("/api/stock-movements")
+        .set("Authorization", `Bearer ${token}`)
+        .send({ productId: stockedProductId, locationId, type: "RECEIVE", quantity: 5 });
+      await request(app).post(`/api/stocktakes/${sheet.body.id}/complete`).set("Authorization", `Bearer ${token}`);
+
+      const res = await exportSheet(token, sheet.body.id);
+
+      // Sheet variance would read -3 (7 - 10); what was actually posted was
+      // -8 (7 - 15 on-hand), and the export must show the real correction.
+      const [, row] = res.text.trim().split("\r\n");
+      expect(row.split(",").slice(0, 6)).toEqual(["SKU-STOCKED", "Apple Sauce", "10", "7", "-8", "Owner"]);
+    });
+
+    it("exposes Content-Disposition across origins, so the browser can read the filename", async () => {
+      // Content-Disposition isn't on the CORS response-header safelist by
+      // default; a browser fetch() from the Vite dev origin can read the
+      // CSV body but not this header unless the server explicitly exposes
+      // it (app.ts's cors({ exposedHeaders: [...] })). Caught by driving
+      // this export through an actual cross-origin browser fetch before
+      // this test existed -- the mocked axios adapter the frontend suite
+      // uses can't see CORS behaviour at all, so this has to be asserted
+      // here, against the header the server actually sends.
+      const token = await signUpAndGetToken("owner@shop.test", "The Shop");
+      const { locationId } = await setUp(token);
+      const sheet = await createStocktake(token, { locationId });
+
+      const res = await exportSheet(token, sheet.body.id);
+
+      expect(res.headers["access-control-expose-headers"]).toContain("Content-Disposition");
+    });
+
+    it("never exports another organization's sheet", async () => {
+      const tokenA = await signUpAndGetToken("a@shop.test", "Shop A");
+      const tokenB = await signUpAndGetToken("b@shop.test", "Shop B");
+      const { locationId } = await setUp(tokenA);
+      await setUp(tokenB);
+      const sheet = await createStocktake(tokenA, { locationId });
+
+      const res = await exportSheet(tokenB, sheet.body.id);
+
+      expect(res.status).toBe(404);
+    });
+  });
+
   describe("who is allowed to do what", () => {
     it("lets Staff open a count and fill it in", async () => {
       const ownerToken = await signUpAndGetToken("owner@shop.test", "The Shop");

@@ -58,3 +58,24 @@ export async function cancelStocktake(id: string): Promise<Stocktake> {
   const res = await apiClient.post<Stocktake>(`/stocktakes/${id}/cancel`);
   return res.data;
 }
+
+// Same blob-download shape as api/reports.ts's downloadExport: the auth
+// header can't ride on a plain <a href>, so the file is fetched through the
+// normal axios instance and handed to the browser as a blob URL. The
+// filename here comes from the server's Content-Disposition (built from the
+// location and date, e.g. "stocktake-main-warehouse-2026-09-03.csv") rather
+// than a fixed one, since "stocktake.csv" would collide across sheets.
+export async function downloadStocktakeExport(id: string): Promise<void> {
+  const res = await apiClient.get(`/stocktakes/${id}/export`, { responseType: "blob" });
+  const disposition = String(res.headers["content-disposition"] ?? "");
+  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? `stocktake-${id}.csv`;
+
+  const url = window.URL.createObjectURL(new Blob([res.data]));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}

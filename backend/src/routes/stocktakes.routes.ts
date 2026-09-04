@@ -4,6 +4,7 @@ import { prisma } from "../lib/prisma";
 import { asyncHandler } from "../lib/asyncHandler";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { ApiError } from "../lib/errors";
+import { toCsv } from "../lib/csv";
 import { requireStockableLocation } from "../lib/locations";
 import { PUBLIC_USER_SELECT } from "../lib/rbac";
 import { applyStocktake, assertOpen, planStocktakeLines, requireStocktake } from "../lib/stocktake";
@@ -127,6 +128,69 @@ router.get(
   "/:id",
   asyncHandler(async (req, res) => {
     res.json(await loadStocktakeWithLines(req.auth!.organizationId, req.params.id));
+  })
+);
+
+/**
+ * The same "counted vs. sheet, or what was actually posted" rule the sheet
+ * itself renders (`lineVariance` in `StocktakesPage.tsx`) — kept in sync
+ * deliberately rather than each computing it independently, since a printed
+ * sheet and the screen disagreeing about a variance is exactly the kind of
+ * thing a counter would (rightly) not trust either of again.
+ */
+function lineVariance(line: { appliedDelta: number | null; countedQty: number | null; expectedQty: number }): number | null {
+  if (line.appliedDelta !== null) return line.appliedDelta;
+  if (line.countedQty === null) return null;
+  return line.countedQty - line.expectedQty;
+}
+
+function csvFilenameSlug(value: string): string {
+  const slug = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || "location";
+}
+
+// Every other write path here is a Node-only affair (see the comment above
+// loadStocktakeWithLines), so this stays Node-only too rather than
+// round-tripping through the Python service like reports.routes.ts's
+// exports: the shaping this needs -- nullable-vs-zero, the applied-vs-sheet
+// variance rule, the product-name sort -- already lives entirely in
+// loadStocktakeWithLines, and restating it in a second SQL query on the
+// Python side would risk the two quietly disagreeing.
+//
+// Works at any status: an OPEN sheet is exactly the thing somebody prints
+// and carries into the aisle with a pen, and a COMPLETED one is the record
+// of what a count actually found.
+router.get(
+  "/:id/export",
+  asyncHandler(async (req, res) => {
+    const sheet = await loadStocktakeWithLines(req.auth!.organizationId, req.params.id);
+
+    const rows: string[][] = [
+      ["SKU", "Product", "Expected", "Counted", "Variance", "Counted by", "Counted at"],
+      ...sheet.lines.map((line) => {
+        const variance = lineVariance(line);
+        return [
+          line.product?.sku ?? "",
+          line.product?.name ?? line.productId,
+          String(line.expectedQty),
+          line.countedQty === null ? "" : String(line.countedQty),
+          variance === null ? "" : String(variance),
+          line.countedBy?.name ?? "",
+          line.countedAt ? new Date(line.countedAt).toISOString() : "",
+        ];
+      }),
+    ];
+
+    const filename = `stocktake-${csvFilenameSlug(sheet.location?.name ?? "")}-${
+      new Date(sheet.createdAt).toISOString().slice(0, 10)
+    }.csv`;
+
+    res.type("text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(toCsv(rows));
   })
 );
 

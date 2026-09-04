@@ -31,8 +31,17 @@ beforeEach(() => {
   // the next one is the classic way a suite like this starts passing for
   // the wrong reason.
   localStorage.clear();
+
+  // This jsdom version also has no URL.createObjectURL/revokeObjectURL
+  // (real browsers have had both for years). Every CSV-download path --
+  // ReportsPage's exports, StocktakesPage's count-sheet export -- calls
+  // them to turn a blob into a clickable link, so this was a one-off local
+  // stub in ReportsPage.test.tsx until a second caller showed up and made
+  // it worth sharing.
+  vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn(() => "blob:mock"), revokeObjectURL: vi.fn() });
 });
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });

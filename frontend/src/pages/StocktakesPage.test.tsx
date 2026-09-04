@@ -293,6 +293,50 @@ describe("StocktakesPage count sheet", () => {
   });
 });
 
+describe("StocktakesPage exporting a count sheet", () => {
+  it("downloads the sheet as CSV", async () => {
+    api.on("GET", "/stocktakes/s1/export", ok("SKU,Product\nAPP-1,Apple Sauce\n"));
+    const { user } = renderPage();
+    await openTheSheet(user);
+
+    await user.click(screen.getByRole("button", { name: "Export CSV" }));
+
+    await waitFor(() => {
+      expect(api.requestsFor("GET", "/stocktakes/s1/export")).toHaveLength(1);
+    });
+  });
+
+  it("surfaces a failed export rather than failing silently", async () => {
+    api.on("GET", "/stocktakes/s1/export", fail(500, "boom"));
+    const { user } = renderPage();
+    await openTheSheet(user);
+
+    await user.click(screen.getByRole("button", { name: "Export CSV" }));
+
+    expect(await screen.findByText("boom")).toBeInTheDocument();
+  });
+
+  it("is available on a completed sheet too, not only while counting", async () => {
+    const completed = stocktake({
+      id: "s1",
+      status: "COMPLETED",
+      countedCount: 1,
+      lines: [line({ id: "ln1", countedQty: 10, appliedDelta: 0 })],
+    });
+    api.on("GET", "/stocktakes", listPage([completed]));
+    api.on("GET", "/stocktakes/s1", ok(completed));
+    api.on("GET", "/stocktakes/s1/export", ok("SKU,Product\nAPP-1,Apple Sauce\n"));
+    const { user } = renderPage();
+    await user.click(await screen.findByRole("button", { name: "Open sheet" }));
+
+    await user.click(await screen.findByRole("button", { name: "Export CSV" }));
+
+    await waitFor(() => {
+      expect(api.requestsFor("GET", "/stocktakes/s1/export")).toHaveLength(1);
+    });
+  });
+});
+
 describe("StocktakesPage completing", () => {
   const countedSheet = stocktake({
     id: "s1",

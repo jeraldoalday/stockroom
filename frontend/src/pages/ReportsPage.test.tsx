@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import { ReportsPage } from "./ReportsPage";
 import { MockApi, fail, ok } from "../test/mockApi";
@@ -65,15 +65,10 @@ let api: MockApi;
 
 beforeEach(() => {
   api = new MockApi();
-  // jsdom here has no URL.createObjectURL/revokeObjectURL (real browsers
-  // have had both for years) — downloadExport calls them to turn the CSV
-  // blob into a clickable link, so the export tests need a stand-in.
-  vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn(() => "blob:mock"), revokeObjectURL: vi.fn() });
 });
 
 afterEach(() => {
   api.restore();
-  vi.unstubAllGlobals();
 });
 
 function renderPage(user = ownerUser) {

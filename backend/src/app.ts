@@ -27,7 +27,12 @@ export function createApp() {
   app.use(requestId);
   app.use(requestLogger);
 
-  app.use(cors({ origin: env.corsOrigin }));
+  // Content-Disposition isn't on the CORS response-header safelist, so
+  // without this a cross-origin fetch() can read a CSV export's body but
+  // not the filename the server chose for it -- exposedHeaders is an
+  // allowlist of extra headers the browser hands to JS, separate from
+  // access-control-allow-origin's allowlist of who may ask at all.
+  app.use(cors({ origin: env.corsOrigin, exposedHeaders: ["Content-Disposition"] }));
   app.use(express.json());
 
   app.get("/health", (_req, res) => res.json({ status: "ok" }));

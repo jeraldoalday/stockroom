@@ -15,6 +15,7 @@ import {
   completeStocktake,
   countStocktakeLine,
   createStocktake,
+  downloadStocktakeExport,
   fetchStocktake,
   fetchStocktakes,
 } from "../api/stocktakes";
@@ -88,6 +89,8 @@ function StocktakeSheet({ stocktakeId, isOwner, onError, onCompleted }: SheetPro
   const fieldId = useId();
   const queryClient = useQueryClient();
   const [addingProductId, setAddingProductId] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const detailQuery = useQuery({
     queryKey: ["stocktakes", stocktakeId],
@@ -171,8 +174,35 @@ function StocktakeSheet({ stocktakeId, isOwner, onError, onCompleted }: SheetPro
     addLineMutation.mutate(addingProductId);
   }
 
+  async function handleExport() {
+    setExportError(null);
+    setExporting(true);
+    try {
+      await downloadStocktakeExport(stocktakeId);
+    } catch (err) {
+      setExportError(errorMessage(err, "Could not export this count sheet"));
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <div className="space-y-3 px-4 py-3">
+      <div className="flex items-center justify-between">
+        <button
+          type="button"
+          onClick={handleExport}
+          disabled={exporting}
+          className="text-xs text-brand-600 hover:underline disabled:opacity-50"
+        >
+          {exporting ? "Exporting..." : "Export CSV"}
+        </button>
+        {exportError && (
+          <span role="alert" className="text-xs text-red-600">
+            {exportError}
+          </span>
+        )}
+      </div>
       <table className="min-w-full text-xs">
         <thead>
           <tr className="text-gray-500">

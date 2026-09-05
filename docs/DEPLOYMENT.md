@@ -111,6 +111,22 @@ migrations are readable too. Without that, the next migration would leave
 the reports service unable to read a new table — and the tempting fix is to
 hand it the owner's credentials.
 
+**Why there are two of these scripts.** `db/init/01-create-readonly-role.sql`
+is a separate file, not a duplicate: it runs automatically as
+`docker-entrypoint-initdb.d` against a fresh local Docker Postgres, so it
+hard-codes a fixed local password and a literal `stockroom` database name —
+neither of which would be safe or even correct against a real deploy target.
+`backend/prisma/sql/readonly_role.sql` (used above) takes the password as a
+`psql -v` variable and reads the database name from the connection itself,
+which is what a real environment needs. They're meant to diverge in exactly
+that way; use the Docker one for local dev, this one everywhere else. (The
+production script had two syntax errors — a `:'var'` substitution inside a
+dollar-quoted block, and an invalid `GRANT ... ON DATABASE CURRENT_CATALOG`
+— that went unnoticed for 18 days because local dev only ever exercised the
+Docker script; see Day 31 in `docs/PROGRESS.md`. Fixed and verified against a
+real Postgres instance, but worth re-running once against whatever you
+deploy to before trusting it blind.)
+
 ### Seed data
 
 `npm run seed` creates the "Northside Grocery" demo organization. It is for

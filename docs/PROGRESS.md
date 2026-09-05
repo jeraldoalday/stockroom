@@ -2884,3 +2884,133 @@ session).
   track) — worth remembering that a `docs/PROGRESS.md` claim of "ran X and
   it worked" is only as trustworthy as whether X was actually the thing on
   disk at the path being described.
+
+## Day 32 (post-MVP) — 2026-09-05
+
+**No container-setup residue this time:** local `main` matched `origin/main`
+exactly at the start of this session (unlike Days 20/24/26/29/30), and no
+recent commit needed the identity rewrite Days 19/21/23/30 did — this
+session's own operating instructions specify the same footer convention Day
+31 adopted (`Co-Authored-By: Claude Sonnet 5`, a `Claude-Session` trailer),
+so there was nothing to reconcile.
+
+**Planned:** the two smaller carry-forward items from Day 31 — the CORS
+response-header sweep, and a `docs/DEPLOYMENT.md` note on the two
+readonly-role scripts — plus a fresh gap sweep, since neither of Day 31's
+larger open items (frontend error reporting, Staff per-location scoping) is
+newly actionable.
+
+**Did — the CORS header sweep (Day 31 item 2):** audited every
+`res.setHeader` call in the backend for the same class of bug Day 31 found
+(a response header the frontend reads cross-origin but the CORS config
+doesn't expose). Found `X-RateLimit-Limit`/`X-RateLimit-Remaining`/
+`Retry-After` (`lib/rateLimit.ts`) and `X-Request-Id`
+(`middleware/requestId.ts`) alongside the already-fixed
+`Content-Disposition` — none of the three rate-limit headers or the request
+id are read by any frontend code (`grep` across `frontend/src` for
+`response.headers`/`getResponseHeader`/those header names turned up
+nothing; the frontend shows rate-limit failures from the response *body*'s
+error message, not its headers). No code change needed. Recording the audit
+here, same as Day 24's `$queryRaw` audit, so a future session doesn't
+silently redo it.
+
+**Shipped — the `docs/DEPLOYMENT.md` note (Day 31 item 3):** explains why
+`db/init/01-create-readonly-role.sql` and `backend/prisma/sql/
+readonly_role.sql` are two files rather than a duplication (fixed local
+Docker credentials vs. a real deploy's `psql -v` password and inferred
+database name) and cross-references Day 31's fix and its two root causes,
+so the next person to read the read-only-role section understands both why
+there are two scripts and that the production one was broken for 18 days
+before Day 31.
+
+**Shipped — F16: create a purchase order directly from a reorder
+suggestion.** The reorder-suggestions report (F12) has said what to buy and
+how much since Day 12; turning that into an actual order meant leaving the
+Reports page, remembering the numbers, and re-entering them by hand on a
+different screen — a report you can look at but can't act on. Products
+carry no single supplier of their own (`PurchaseOrder.supplierId` is
+order-level, not product-level), so the gap isn't "which supplier" so much
+as "don't make me retype what the report already told me."
+
+- `components/reorderToPurchaseOrder.ts`: `toPurchaseOrderPrefillLines`, a
+  pure function mapping selected `ReorderSuggestion`s to
+  `PurchaseOrderLineInput`s (product id + suggested quantity, unit cost left
+  at 0 since the reorder report carries no cost figure to prefill it with).
+  Floors a suggestion at 1 rather than 0 — `suggestedQty` itself floors at 0
+  server-side (a product with no configured reorder quantity and no demand
+  yet), but the purchase-order form's own quantity input requires at least
+  1, so a 0-quantity line would be silently rejected by the very form it's
+  headed to. Extracted as its own file with its own tests (4 cases) rather
+  than left inline, matching this codebase's existing pattern for
+  once-per-page logic worth naming (`movementReason.ts`,
+  `emptyListMessage.ts`).
+- `ReportsPage`: a per-row checkbox on the reorder-suggestions table
+  (Owner-only, mirroring the dead-stock panel's own Owner gate one section
+  down, since the destination — purchase-order creation — is Owner-only on
+  both the frontend and the backend) and a "Create purchase order from
+  selected (N)" button, disabled at N=0. Clicking it navigates to
+  `/purchase-orders` with the prefill lines in router state.
+- `PurchaseOrdersPage`: reads `location.state.prefillLines` once, via a lazy
+  `useState` initializer rather than an effect, so the create form opens
+  already populated on the very first render instead of flashing empty
+  first — the same one-shot-navigation-state pattern `LoginPage` already
+  uses for its post-reset/post-invite banners. Shows a dismissible
+  `role="status"` banner ("N lines filled in from the reorder suggestions
+  report...") that clears when the form is cancelled or a purchase order is
+  successfully created. Supplier and unit cost are left for the Owner to
+  fill in — neither has an honest default to prefill from.
+- 4 new tests for the pure mapping function, 3 new integration tests in
+  `ReportsPage.test.tsx` (checkboxes and the action hidden from Staff;
+  disabled at zero selected; the full handoff — check a row, click through,
+  land on a real `PurchaseOrdersPage` with the banner shown and the correct
+  product/quantity prefilled) rendered against the real destination page
+  under `<Routes>`, the same "the page under test plus the real page it
+  navigates to" pattern `authPages.test.tsx` already established for
+  `LoginPage`'s post-login redirect.
+
+**Verified beyond the test suite, against real Postgres + all three
+services + a real browser:** created the `stockroom` role/db and the
+`stockroom_readonly` role from scratch (neither existed yet this session),
+ran all twelve migrations, and drove the whole feature through a real
+Chromium session (global `playwright`, same as every recent session that's
+had it available): signed up, created a supplier and a product (reorder
+point 10, reorder quantity 5), received 3 units (below the reorder point,
+no sales history so the suggestion floors at the configured `reorderQty`
+of 5), went to Reports, checked the row, clicked through, landed on
+Purchase Orders with the banner shown and the product/quantity-5 line
+already filled in, picked the supplier and a unit cost, submitted, and
+confirmed the order appeared in the list as a Draft against Acme Supplies.
+Backend request log confirmed the actual `POST /api/purchase-orders`
+returned 201. Teardown after: dev servers killed, `stockroom`/
+`stockroom_readonly` roles and the `stockroom` database dropped.
+
+**Verified (all three services):** backend `npx tsc --noEmit`, `npm run
+lint`, full Jest suite (408/408, unchanged — no backend file touched this
+session, the feature is entirely frontend); frontend `npm run lint`, `tsc
+-b`, `npm test` (434/434, up from 427 — 4 new pure-function tests, 3 new
+ReportsPage integration tests), `npm run build`; python-service `python3 -m
+pytest -q` (47/47, unaffected). All clean.
+
+**Next:**
+
+1. Still open, low urgency and unchanged across several entries: frontend
+   error reporting (no external sink to report to) and Staff per-location
+   scoping (no design partner).
+2. The reorder-suggestions-to-purchase-order handoff (F16) only carries
+   product and quantity, since that's all the reorder report can honestly
+   supply — a natural follow-up, if it turns out to matter in practice,
+   would be remembering the last supplier used for a given product (there's
+   no product-supplier relationship in the schema to read that from today)
+   so repeat reorders of the same product don't need the supplier reselected
+   every time. Not built speculatively; nothing in the PRD or this session's
+   verification suggested it was actually needed yet.
+3. No other fresh gaps surfaced this session worth adding to the list.
+
+**Blockers/decisions carried forward:**
+
+- None new. Leaving unit cost unprefilled (rather than defaulting it from
+  the product's own `costCents`) was a deliberate call, not an oversight: a
+  product's cost field is what the *last* purchase cost, which is exactly
+  the number a new purchase order might be renegotiating — defaulting to it
+  would read as the app asserting a price rather than leaving that decision
+  where it belongs, with whoever is actually placing the order.

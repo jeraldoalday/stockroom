@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
+import { Route, Routes } from "react-router-dom";
 import { ReportsPage } from "./ReportsPage";
+import { PurchaseOrdersPage } from "./PurchaseOrdersPage";
 import { MockApi, fail, ok } from "../test/mockApi";
 import { ownerUser, renderApp, staffUser } from "../test/render";
 import type { DeadStockResponse, ReorderSuggestionsResponse, TrendResponse } from "../api/reports";
@@ -331,5 +333,70 @@ describe("ReportsPage export", () => {
 
     await waitFor(() => expect(api.requestsFor("GET", "/reports/export/movements")).toHaveLength(1));
     expect(api.requestsFor("GET", "/reports/export/movements")[0].params).toEqual({ days: 30 });
+  });
+});
+
+describe("ReportsPage reorder suggestions -> purchase order handoff", () => {
+  // The button navigates to the real purchase-order form, so it's rendered
+  // alongside ReportsPage the same way authPages.test.tsx renders LoginPage
+  // next to the real page it navigates to on success.
+  function withPurchaseOrders(element: JSX.Element) {
+    return (
+      <Routes>
+        <Route path="/reports" element={element} />
+        <Route path="/purchase-orders" element={<PurchaseOrdersPage />} />
+      </Routes>
+    );
+  }
+
+  function mockPurchaseOrderLookups() {
+    api.on("GET", "/suppliers", ok({ items: [], total: 0, page: 1, pageSize: 25 }));
+    api.on(
+      "GET",
+      "/products",
+      ok({
+        items: [{ id: "p1", sku: "WID-1", name: "Widget", description: null, categoryId: null, costCents: 500, priceCents: 999, reorderPoint: 5, reorderQty: 10, isActive: true }],
+        total: 1,
+        page: 1,
+        pageSize: 100,
+      })
+    );
+    api.on("GET", "/locations", ok([]));
+    api.on("GET", "/purchase-orders", ok({ items: [], total: 0, page: 1, pageSize: 25 }));
+  }
+
+  it("hides the selection checkboxes and the create-order action from Staff", async () => {
+    mockAllPanels();
+    renderApp(withPurchaseOrders(<ReportsPage />), { route: "/reports", user: staffUser });
+
+    await screen.findByText("Widget");
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Create purchase order/ })).not.toBeInTheDocument();
+  });
+
+  it("disables the create-order action until a row is selected", async () => {
+    mockAllPanels();
+    renderApp(withPurchaseOrders(<ReportsPage />), { route: "/reports", user: ownerUser });
+
+    await screen.findByText("Widget");
+    expect(screen.getByRole("button", { name: "Create purchase order from selected (0)" })).toBeDisabled();
+  });
+
+  it("hands the selected product off to a prefilled purchase-order form", async () => {
+    mockAllPanels();
+    mockPurchaseOrderLookups();
+    const { user } = renderApp(withPurchaseOrders(<ReportsPage />), { route: "/reports", user: ownerUser });
+    await screen.findByText("Widget");
+
+    await user.click(screen.getByRole("checkbox", { name: "Select Widget for a purchase order" }));
+    expect(screen.getByRole("button", { name: "Create purchase order from selected (1)" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Create purchase order from selected (1)" }));
+
+    expect(await screen.findByText(/filled in from the reorder suggestions report/)).toBeInTheDocument();
+    const productSelect = screen
+      .getAllByRole("combobox")
+      .find((el) => (el as HTMLSelectElement).value === "p1");
+    expect(productSelect).toBeTruthy();
+    expect(screen.getByPlaceholderText("Qty")).toHaveValue(19);
   });
 });

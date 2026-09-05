@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { AppShell } from "../components/AppShell";
 import { downloadExport, fetchDeadStock, fetchReorderSuggestions, fetchTrend } from "../api/reports";
-import type { ExportKind } from "../api/reports";
+import type { ExportKind, ReorderSuggestion } from "../api/reports";
+import { toPurchaseOrderPrefillLines } from "../components/reorderToPurchaseOrder";
 import { isApiError } from "../api/errors";
 import { useAuth } from "../context/AuthContext";
 
@@ -25,10 +27,27 @@ const EXPORT_LABELS: Record<ExportKind, string> = {
 export function ReportsPage() {
   const { user } = useAuth();
   const isOwner = user?.role === "OWNER";
+  const navigate = useNavigate();
   const [days, setDays] = useState<7 | 30>(7);
   const [deadStockDays, setDeadStockDays] = useState(90);
   const [exportingKind, setExportingKind] = useState<ExportKind | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
+
+  function toggleSelected(productId: string) {
+    setSelectedProductIds((current) => {
+      const next = new Set(current);
+      if (next.has(productId)) next.delete(productId);
+      else next.add(productId);
+      return next;
+    });
+  }
+
+  function createPurchaseOrderFromSelection(items: ReorderSuggestion[]) {
+    const selected = items.filter((item) => selectedProductIds.has(item.productId));
+    if (selected.length === 0) return;
+    navigate("/purchase-orders", { state: { prefillLines: toPurchaseOrderPrefillLines(selected) } });
+  }
 
   const trendQuery = useQuery({ queryKey: ["reports", "trend", days], queryFn: () => fetchTrend(days) });
   const reorderQuery = useQuery({ queryKey: ["reports", "reorder-suggestions"], queryFn: fetchReorderSuggestions });
@@ -144,6 +163,7 @@ export function ReportsPage() {
             <table className="min-w-full text-sm">
               <thead>
                 <tr className="text-left text-gray-500">
+                  {isOwner && <th scope="col" className="py-1.5 pr-4"><span className="sr-only">Select</span></th>}
                   <th scope="col" className="py-1.5 pr-4">Product</th>
                   <th scope="col" className="py-1.5 pr-4">On hand</th>
                   <th scope="col" className="py-1.5 pr-4">Avg daily demand</th>
@@ -154,6 +174,16 @@ export function ReportsPage() {
               <tbody>
                 {reorderQuery.data.items.map((item) => (
                   <tr key={item.productId} className="border-t border-gray-100">
+                    {isOwner && (
+                      <td className="py-1.5 pr-4">
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${item.name} for a purchase order`}
+                          checked={selectedProductIds.has(item.productId)}
+                          onChange={() => toggleSelected(item.productId)}
+                        />
+                      </td>
+                    )}
                     <td className="py-1.5 pr-4 text-gray-900">
                       {item.name} <span className="text-gray-500">({item.sku})</span>
                     </td>
@@ -167,6 +197,16 @@ export function ReportsPage() {
                 ))}
               </tbody>
             </table>
+            {isOwner && (
+              <button
+                type="button"
+                disabled={selectedProductIds.size === 0}
+                onClick={() => createPurchaseOrderFromSelection(reorderQuery.data.items)}
+                className="mt-3 rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Create purchase order from selected ({selectedProductIds.size})
+              </button>
+            )}
           </div>
         )}
       </div>

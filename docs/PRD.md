@@ -81,9 +81,10 @@ by `organizationId` at the middleware layer, never trusted from the client.
 | F13 | Dead-stock report: products holding stock that isn't selling, valued at cost | P2 | Shipped (day 18) |
 | F14 | Low-stock email digest: daily push to Owners, not just the dashboard pull | P2 | Shipped (day 27) |
 | F15 | Stocktake: count a location physically, and reconcile the ledger to it | P2 | Shipped (day 30) |
+| F16 | Create a purchase order directly from a reorder suggestion | P2 | Shipped (day 32) |
 
 All twelve MVP requirements are implemented end to end (API, UI, and tests);
-F13-F14 are post-v1 additions rather than part of that scope. "Top movers"
+F13-F16 are post-v1 additions rather than part of that scope. "Top movers"
 appears in section 3, goal 5 but was missing from the F9 row above until
 day 14; the row now reflects what F9 was always meant to include.
 
@@ -137,6 +138,16 @@ delivery is. Completing one is Owner-only: that is the moment shrinkage is
 written off against stock value, which is an accounting act rather than a
 warehouse one, and the same reasoning §4 uses to keep cost data away from
 Staff in the first place.
+
+F16 closes the gap between F12's report and actually acting on it: the
+reorder-suggestions list has said what to buy and how much since day 12,
+but turning that into an order meant leaving the Reports page and
+re-entering the same numbers by hand on Purchase Orders. An Owner selects
+suggestions and lands on a purchase-order form pre-filled with each
+product and its suggested quantity; supplier and unit cost are left blank,
+since products carry no single supplier of their own in this schema and a
+purchase order's unit cost is a per-order negotiation, not something the
+report has an honest number for.
 
 ## 7. Non-functional requirements
 

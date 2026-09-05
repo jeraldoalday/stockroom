@@ -1,5 +1,6 @@
 import { useId, useState } from "react";
 import type { FormEvent } from "react";
+import { useLocation } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
 import { useAuth } from "../context/AuthContext";
@@ -199,12 +200,22 @@ export function PurchaseOrdersPage() {
   const { user } = useAuth();
   const isOwner = user?.role === "OWNER";
 
-  const [showForm, setShowForm] = useState(false);
+  // The reorder-suggestions panel on ReportsPage can land here with lines
+  // already chosen (product + suggested quantity) via router state. Read it
+  // once, at mount, with a lazy initializer -- not an effect -- so the form
+  // opens pre-filled on the very first render rather than flashing empty
+  // first. Reading `location.state` directly (not clearing it) matches how
+  // LoginPage already treats one-shot navigation state elsewhere in this app.
+  const location = useLocation();
+  const prefill = (location.state as { prefillLines?: PurchaseOrderLineInput[] } | null)?.prefillLines;
+
+  const [showForm, setShowForm] = useState(Boolean(prefill?.length));
   const [formError, setFormError] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [receivingId, setReceivingId] = useState<string | null>(null);
-  const [lines, setLines] = useState<PurchaseOrderLineInput[]>([{ ...emptyLine }]);
+  const [lines, setLines] = useState<PurchaseOrderLineInput[]>(prefill?.length ? prefill : [{ ...emptyLine }]);
+  const [prefillNotice, setPrefillNotice] = useState(Boolean(prefill?.length));
 
   const ordersQuery = useQuery({ queryKey: ["purchase-orders"], queryFn: () => fetchPurchaseOrders() });
   const suppliersQuery = useQuery({ queryKey: ["suppliers", "all"], queryFn: () => fetchSuppliers() });
@@ -225,6 +236,7 @@ export function PurchaseOrdersPage() {
       invalidate();
       setShowForm(false);
       setLines([{ ...emptyLine }]);
+      setPrefillNotice(false);
     },
     onError: (err) => {
       setFormError(isApiError(err) ? err.response?.data?.error ?? "Could not create purchase order" : "Could not create purchase order");
@@ -299,7 +311,10 @@ export function PurchaseOrdersPage() {
         {isOwner && (
           <button
             type="button"
-            onClick={() => setShowForm((v) => !v)}
+            onClick={() => {
+              setShowForm((v) => !v);
+              setPrefillNotice(false);
+            }}
             className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
           >
             {showForm ? "Cancel" : "New purchase order"}
@@ -309,6 +324,12 @@ export function PurchaseOrdersPage() {
 
       {showForm && (
         <form onSubmit={handleCreate} className="mb-6 space-y-4 rounded-lg border border-gray-200 bg-white p-4">
+          {prefillNotice && (
+            <div role="status" className="rounded-md bg-brand-50 px-3 py-2 text-sm text-brand-700">
+              {lines.length} line{lines.length === 1 ? "" : "s"} filled in from the reorder suggestions
+              report. Pick a supplier and unit cost, then create.
+            </div>
+          )}
           {formError && <div role="alert" className="text-sm text-red-600">{formError}</div>}
           <div className="grid grid-cols-2 gap-4">
             <div>

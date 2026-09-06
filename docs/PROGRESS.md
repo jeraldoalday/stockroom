@@ -3014,3 +3014,131 @@ pytest -q` (47/47, unaffected). All clean.
   the number a new purchase order might be renegotiating — defaulting to it
   would read as the app asserting a price rather than leaving that decision
   where it belongs, with whoever is actually placing the order.
+
+## Day 33 (post-MVP) — 2026-09-06
+
+**Planned:** local `main` had drifted from `origin/main` again at session
+start (detached HEAD sitting three commits — Day 32's own work — ahead of
+the local `main` ref, same stale-branch pattern several prior entries have
+hit); reset local `main` onto `origin/main` before touching anything, and
+confirmed the two refs matched. From there, picked up a fresh accessibility
+gap sweep (delegated first, since Day 32's own "Next" list had nothing newly
+actionable — frontend error reporting and Staff per-location scoping are
+both still blocked on infra/a design partner this project doesn't have),
+then a second gap sweep for one more slice once that one turned out smaller
+than expected.
+
+**Shipped — accessibility: table captions, and the PRD's own stale claim
+about them:**
+
+- A background survey found `docs/PRD.md` §13 saying "colour contrast,
+  `aria-live` for the inline error banners, table semantics — has not been
+  done" was itself wrong — Day 26 (2026-08-30) shipped all three
+  (`role="alert"`/`"status"` on ~50 banners, `scope="col"` on every `<th>`,
+  and a contrast sweep fixing the one real failure, `text-gray-400`) but the
+  bullet was never struck through. Corrected the doc with the real history
+  rather than leaving it to mislead the next session into re-doing work
+  that's already there.
+- What Day 26 didn't reach, confirmed against the running app rather than
+  guessed: no `<table>` anywhere had a `<caption>` or other accessible name,
+  so a screen reader's table-navigation commands would show every list and
+  report table as blank. Added `<caption className="sr-only">` to all 21
+  tables across every list/report page (dynamic captions on the purchase-
+  and sales-order line-item tables, naming the actual supplier/customer —
+  verified in a real browser: "Order lines for Corner Street Bakery", not a
+  generic label).
+- 3 more `text-gray-400` (~2.5:1, fails WCAG AA) spots had crept back in —
+  added by sessions after Day 26's own sweep ran (`StocktakesPage.tsx`'s
+  "Not counted"/SKU parenthetical, `ProductsPage.tsx`'s "Not applied yet" in
+  the stocktake-history panel added on Day 30). Switched all three to
+  `text-gray-500` (~4.8:1, confirmed via the compiled Tailwind CSS as the
+  exact same `rgb(107 114 128)` already verified passing elsewhere in the
+  app).
+
+**Shipped — F17 (unnumbered in the PRD, but the same shape as every other
+functional requirement): edit a draft purchase or sales order's own lines.**
+A second gap-sweep agent read `purchaseOrders.routes.ts`/`salesOrders.routes.ts`
+end to end looking for either a real logic bug (none found rising to the bar
+of Day 12/14/31's) or an unbuilt, appropriately-scoped gap, and found this:
+once an order existed, only its supplier/customer and notes could be
+patched — never its lines. Today's only fix for a mis-keyed draft (wrong
+product, wrong quantity, wrong cost) was cancelling the whole order and
+recreating it, since `PurchaseOrderLine`/`SalesOrderLine` rows were only
+ever created inside `POST /`. Stocktakes already had exactly this
+add/edit-a-line pattern for OPEN sheets (`POST /:id/lines`,
+`PATCH /:id/lines/:lineId`); purchase and sales orders never got the
+equivalent for DRAFT ones.
+
+- Three new routes per order type: `POST /:id/lines`, `PATCH
+  /:id/lines/:lineId`, `DELETE /:id/lines/:lineId` — gated and scoped
+  identically to each order type's existing `PATCH /:id` (purchase orders:
+  Owner-only + DRAFT-only, matching the PRD persona model already used
+  everywhere else in that file; sales orders: ungated + DRAFT-only, since
+  fulfilling a sales order is explicit Staff work and editing its own draft
+  lines is the same kind of task). A line can't be removed if it's the
+  order's last one, mirroring `createSchema`'s own `lines: z.array(...).min(1)`
+  — an order with zero lines isn't a smaller order. Factored the repeated
+  "load this order, require DRAFT" check into
+  `requireDraftPurchaseOrder`/`requireDraftSalesOrder` (three new call sites
+  each made the duplication worth naming, following the same pattern
+  `stocktakes.routes.ts` already established with `requireStocktake`).
+- Frontend: the existing read-only line table in each order's expanded
+  detail view becomes editable number inputs (quantity, unit cost/price) for
+  a draft — `onBlur`-triggered, matching the pattern `StocktakesPage`'s own
+  count inputs already use — with a per-line Remove button (disabled at the
+  last line) and an inline add-line control below the table. No new screen;
+  this lives entirely in the detail-expand surface both pages already have.
+- 7 new backend tests (add/edit/remove happy path, last-line-removal
+  rejected with 400, blocked once the order is no longer a draft, and
+  Owner-only enforcement on purchase orders specifically — sales orders'
+  equivalent is implicitly covered since every test there uses a
+  non-Owner-gated flow already). 6 new frontend tests, plus 3 existing
+  PO/SO detail tests updated: a draft's own lines now render as inputs
+  rather than static `$X.XX` text for whichever role can edit them
+  (Owner-only for purchase orders, Owner-and-Staff for sales orders), which
+  the old assertions didn't anticipate.
+
+**Verified beyond the test suite, against real Postgres + all three
+services + a real browser:** created a fresh draft purchase order, expanded
+it, added a second line (`Product to add`/`Quantity to add`/`Unit cost to
+add`), confirmed the row count went from 9 to 10; edited the first line's
+quantity to 9 via blur and confirmed it persisted; removed the added line
+and confirmed the count dropped back to 9; confirmed the sole remaining
+line's Remove button was disabled. Repeated the same add/edit/remove
+sequence on a sales order signed in as the Staff account specifically (since
+that route is ungated), confirming a Staff user can add a line, edit a unit
+price to $19.99, and remove a line, all without ever seeing an Owner-only
+gate. No console or network errors in either run beyond the expected
+favicon 404.
+
+**Verified (all three services):** backend `npx tsc --noEmit`, `npm run
+lint`, full Jest suite (415/415, up from 408 — 7 new purchase/sales-order
+line-management tests); frontend `npm run lint`, `tsc -b`, `npm test`
+(440/440, up from 434 — 6 new line-management tests, 3 existing detail tests
+updated for the new editable-input rendering), `npm run build`;
+python-service `python3 -m pytest -q` (47/47, unaffected — no python-service
+file touched this session). All clean.
+
+**Next:**
+
+1. Still open, low urgency and unchanged across many entries: frontend
+   error reporting (no external sink) and Staff per-location scoping (no
+   design partner) — neither newly actionable this session either.
+2. A background bug hunt across stocktake completion math, the rate
+   limiter's atomic upsert, refresh-token rotation, CSV round-tripping, and
+   the reorder-suggestions Python query's SALE-sign convention found nothing
+   rising to the bar of a real logic bug — recording that here (like Day
+   24's `$queryRaw` audit and Day 32's CORS-header sweep) so a future
+   session doesn't silently re-run the same search.
+3. Sales-order lines share the identical "no independent edit path" gap
+   purchase orders had — now closed by the same session, so nothing left
+   here specifically.
+
+**Blockers/decisions carried forward:**
+
+- None new. The two `requireDraft*` helpers are file-local, not moved to a
+  shared `lib/`, since purchase and sales orders diverge on who's gated
+  (Owner-only vs. ungated) — a shared helper would need to take the gating
+  as a parameter for no real duplication savings, and each order type's
+  route file already owns its own status-transition logic (order/cancel/
+  receive vs. cancel/fulfill) independently.

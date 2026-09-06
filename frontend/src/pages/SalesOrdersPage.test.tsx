@@ -242,7 +242,9 @@ describe("SalesOrdersPage row detail", () => {
     await user.click(screen.getByRole("button", { name: "View" }));
 
     expect(await screen.findByText("Widget")).toBeInTheDocument();
-    expect(screen.getByText("$9.99")).toBeInTheDocument();
+    // A draft's own lines are editable (fulfilling and now editing a draft
+    // are both Staff-reachable), so price renders as an input's value.
+    expect(screen.getByLabelText("Unit price for Widget")).toHaveValue(9.99);
     expect(api.requestsFor("GET", "/sales-orders/so1")).toHaveLength(1);
   });
 
@@ -255,7 +257,65 @@ describe("SalesOrdersPage row detail", () => {
 
     await user.click(screen.getByRole("button", { name: "View" }));
 
-    expect(await screen.findByText("$9.99")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Unit price for Widget")).toHaveValue(9.99);
+  });
+
+  it("lets a Staff user add a line on a draft", async () => {
+    mockLookups();
+    api.on("GET", "/sales-orders", page([draft]));
+    api.on("GET", "/sales-orders/so1", ok({ ...draft, lines }));
+    api.on("POST", "/sales-orders/so1/lines", ok({ ...draft, lines }, 201));
+    const { user } = renderPage(staffUser);
+    await screen.findByText("Walk-in");
+    await user.click(screen.getByRole("button", { name: "View" }));
+    await screen.findByText("Widget");
+
+    await user.selectOptions(screen.getByLabelText("Product to add"), "Gadget (GAD-1)");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    await waitFor(() => expect(api.requestsFor("POST", "/sales-orders/so1/lines")).toHaveLength(1));
+    expect(JSON.parse(api.requestsFor("POST", "/sales-orders/so1/lines")[0].data as string)).toMatchObject({
+      productId: "p2",
+      quantity: 1,
+      unitPriceCents: 0,
+    });
+  });
+
+  it("lets an Owner edit and remove a line on a draft with more than one line", async () => {
+    const twoLines = [...lines, { id: "line2", productId: "p2", quantity: 1, unitPriceCents: 1999, product: gadget }];
+    mockLookups();
+    api.on("GET", "/sales-orders", page([draft]));
+    api.on("GET", "/sales-orders/so1", ok({ ...draft, lines: twoLines }));
+    api.on("PATCH", "/sales-orders/so1/lines/line1", ok({ ...draft, lines: twoLines }));
+    api.on("DELETE", "/sales-orders/so1/lines/line2", ok({ ...draft, lines }));
+    const { user } = renderPage();
+    await screen.findByText("Walk-in");
+    await user.click(screen.getByRole("button", { name: "View" }));
+    await screen.findByText("Widget");
+
+    const qtyInput = screen.getByLabelText("Quantity for Widget");
+    fireEvent.change(qtyInput, { target: { value: "5" } });
+    fireEvent.blur(qtyInput);
+    await waitFor(() => expect(api.requestsFor("PATCH", "/sales-orders/so1/lines/line1")).toHaveLength(1));
+    expect(JSON.parse(api.requestsFor("PATCH", "/sales-orders/so1/lines/line1")[0].data as string)).toEqual({
+      quantity: 5,
+    });
+
+    const removeButtons = screen.getAllByRole("button", { name: "Remove" });
+    expect(removeButtons.every((btn) => !btn.hasAttribute("disabled"))).toBe(true);
+    await user.click(removeButtons[1]);
+    await waitFor(() => expect(api.requestsFor("DELETE", "/sales-orders/so1/lines/line2")).toHaveLength(1));
+  });
+
+  it("disables removing a sales order's last remaining line", async () => {
+    mockLookups();
+    api.on("GET", "/sales-orders", page([draft]));
+    api.on("GET", "/sales-orders/so1", ok({ ...draft, lines }));
+    const { user } = renderPage();
+    await screen.findByText("Walk-in");
+    await user.click(screen.getByRole("button", { name: "View" }));
+    await screen.findByText("Widget");
+
+    expect(screen.getByRole("button", { name: "Remove" })).toBeDisabled();
   });
 });
 

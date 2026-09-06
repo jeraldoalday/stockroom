@@ -45,3 +45,22 @@ export async function fulfillSalesOrder(id: string): Promise<SalesOrder> {
   const res = await apiClient.post<SalesOrder>(`/sales-orders/${id}/fulfill`);
   return res.data;
 }
+
+export async function addSalesOrderLine(id: string, payload: SalesOrderLineInput): Promise<SalesOrder> {
+  const res = await apiClient.post<SalesOrder>(`/sales-orders/${id}/lines`, payload);
+  return res.data;
+}
+
+export async function updateSalesOrderLine(
+  id: string,
+  lineId: string,
+  payload: Partial<Pick<SalesOrderLineInput, "quantity" | "unitPriceCents">>
+): Promise<SalesOrder> {
+  const res = await apiClient.patch<SalesOrder>(`/sales-orders/${id}/lines/${lineId}`, payload);
+  return res.data;
+}
+
+export async function removeSalesOrderLine(id: string, lineId: string): Promise<SalesOrder> {
+  const res = await apiClient.delete<SalesOrder>(`/sales-orders/${id}/lines/${lineId}`);
+  return res.data;
+}

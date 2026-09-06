@@ -3,6 +3,7 @@ import request from "supertest";
 jest.mock("../lib/prisma");
 
 import { resetPrismaMock } from "./testUtils/prismaMock";
+import { inviteAndSetPassword } from "./testUtils/invite";
 import { createApp } from "../app";
 
 const app = createApp();
@@ -173,5 +174,81 @@ describe("Purchase orders API", () => {
       .set("Authorization", `Bearer ${token}`)
       .send({ notes: "updated" });
     expect(patch.status).toBe(400);
+  });
+
+  it("adds, edits, and removes lines on a draft purchase order", async () => {
+    const token = await signUpAndGetToken("owner7@shop.test", "The Shop");
+    const { supplierId, productId } = await setUp(token);
+    const po = await createDraftPo(token, supplierId, productId);
+
+    const secondProduct = await request(app)
+      .post("/api/products")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ sku: "SKU-2", name: "Gadget" });
+
+    const added = await request(app)
+      .post(`/api/purchase-orders/${po.body.id}/lines`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ productId: secondProduct.body.id, quantityOrdered: 5, unitCostCents: 250 });
+    expect(added.status).toBe(201);
+    expect(added.body.lines).toHaveLength(2);
+    const newLine = added.body.lines.find((l: { productId: string }) => l.productId === secondProduct.body.id);
+
+    const edited = await request(app)
+      .patch(`/api/purchase-orders/${po.body.id}/lines/${newLine.id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ quantityOrdered: 9 });
+    expect(edited.status).toBe(200);
+    const editedLine = edited.body.lines.find((l: { id: string }) => l.id === newLine.id);
+    expect(editedLine.quantityOrdered).toBe(9);
+    expect(editedLine.unitCostCents).toBe(250);
+
+    const removed = await request(app)
+      .delete(`/api/purchase-orders/${po.body.id}/lines/${newLine.id}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(removed.status).toBe(200);
+    expect(removed.body.lines).toHaveLength(1);
+  });
+
+  it("rejects removing a purchase order's last remaining line", async () => {
+    const token = await signUpAndGetToken("owner8@shop.test", "The Shop");
+    const { supplierId, productId } = await setUp(token);
+    const po = await createDraftPo(token, supplierId, productId);
+    const onlyLineId = po.body.lines[0].id;
+
+    const res = await request(app)
+      .delete(`/api/purchase-orders/${po.body.id}/lines/${onlyLineId}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(400);
+  });
+
+  it("blocks line edits once the purchase order is no longer a draft", async () => {
+    const token = await signUpAndGetToken("owner9@shop.test", "The Shop");
+    const { supplierId, productId } = await setUp(token);
+    const po = await createDraftPo(token, supplierId, productId);
+    await request(app)
+      .post(`/api/purchase-orders/${po.body.id}/order`)
+      .set("Authorization", `Bearer ${token}`);
+
+    const res = await request(app)
+      .post(`/api/purchase-orders/${po.body.id}/lines`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ productId, quantityOrdered: 1, unitCostCents: 100 });
+    expect(res.status).toBe(400);
+  });
+
+  it("keeps line management Owner-only, like the rest of purchase-order management", async () => {
+    const token = await signUpAndGetToken("owner10@shop.test", "The Shop");
+    const { supplierId, productId } = await setUp(token);
+    const po = await createDraftPo(token, supplierId, productId);
+    await inviteAndSetPassword(app, token, { email: "clerk10@shop.test", password: "hunter22222" });
+    const login = await request(app).post("/api/auth/login").send({ email: "clerk10@shop.test", password: "hunter22222" });
+    const staffToken = login.body.accessToken as string;
+
+    const res = await request(app)
+      .post(`/api/purchase-orders/${po.body.id}/lines`)
+      .set("Authorization", `Bearer ${staffToken}`)
+      .send({ productId, quantityOrdered: 1, unitCostCents: 100 });
+    expect(res.status).toBe(403);
   });
 });

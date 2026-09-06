@@ -53,3 +53,22 @@ export async function receivePurchaseOrder(id: string, payload: ReceivePurchaseO
   const res = await apiClient.post<PurchaseOrder>(`/purchase-orders/${id}/receive`, payload);
   return res.data;
 }
+
+export async function addPurchaseOrderLine(id: string, payload: PurchaseOrderLineInput): Promise<PurchaseOrder> {
+  const res = await apiClient.post<PurchaseOrder>(`/purchase-orders/${id}/lines`, payload);
+  return res.data;
+}
+
+export async function updatePurchaseOrderLine(
+  id: string,
+  lineId: string,
+  payload: Partial<Pick<PurchaseOrderLineInput, "quantityOrdered" | "unitCostCents">>
+): Promise<PurchaseOrder> {
+  const res = await apiClient.patch<PurchaseOrder>(`/purchase-orders/${id}/lines/${lineId}`, payload);
+  return res.data;
+}
+
+export async function removePurchaseOrderLine(id: string, lineId: string): Promise<PurchaseOrder> {
+  const res = await apiClient.delete<PurchaseOrder>(`/purchase-orders/${id}/lines/${lineId}`);
+  return res.data;
+}

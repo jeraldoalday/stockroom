@@ -248,7 +248,9 @@ describe("PurchaseOrdersPage row detail", () => {
     await user.click(screen.getByRole("button", { name: "View" }));
 
     expect(await screen.findByText("Unit cost")).toBeInTheDocument();
-    expect(screen.getByText("$5.00")).toBeInTheDocument();
+    // A draft's own lines are editable for an Owner, so the cost renders as
+    // an input's value rather than static currency text.
+    expect(screen.getByLabelText("Unit cost for Widget")).toHaveValue(5);
   });
 
   it("hides the Unit cost column from Staff", async () => {
@@ -263,6 +265,65 @@ describe("PurchaseOrdersPage row detail", () => {
     await screen.findByText("Widget");
     expect(screen.queryByText("Unit cost")).not.toBeInTheDocument();
     expect(screen.queryByText("$5.00")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Product to add")).not.toBeInTheDocument();
+  });
+
+  it("lets an Owner add a line on a draft", async () => {
+    mockLookups();
+    api.on("GET", "/purchase-orders", page([draft]));
+    api.on("GET", "/purchase-orders/po1", ok({ ...draft, lines }));
+    api.on("POST", "/purchase-orders/po1/lines", ok({ ...draft, lines }, 201));
+    const { user } = renderPage();
+    await screen.findByText("Acme Supplies");
+    await user.click(screen.getByRole("button", { name: "View" }));
+    await screen.findByText("Widget");
+
+    await user.selectOptions(screen.getByLabelText("Product to add"), "Gadget (GAD-1)");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    await waitFor(() => expect(api.requestsFor("POST", "/purchase-orders/po1/lines")).toHaveLength(1));
+    expect(JSON.parse(api.requestsFor("POST", "/purchase-orders/po1/lines")[0].data as string)).toMatchObject({
+      productId: "p2",
+      quantityOrdered: 1,
+      unitCostCents: 0,
+    });
+  });
+
+  it("lets an Owner edit and remove a line on a draft with more than one line", async () => {
+    const twoLines = [...lines, { id: "line2", productId: "p2", quantityOrdered: 3, quantityReceived: 0, unitCostCents: 800, product: gadget }];
+    mockLookups();
+    api.on("GET", "/purchase-orders", page([draft]));
+    api.on("GET", "/purchase-orders/po1", ok({ ...draft, lines: twoLines }));
+    api.on("PATCH", "/purchase-orders/po1/lines/line1", ok({ ...draft, lines: twoLines }));
+    api.on("DELETE", "/purchase-orders/po1/lines/line2", ok({ ...draft, lines }));
+    const { user } = renderPage();
+    await screen.findByText("Acme Supplies");
+    await user.click(screen.getByRole("button", { name: "View" }));
+    await screen.findByText("Widget");
+
+    const qtyInput = screen.getByLabelText("Ordered quantity for Widget");
+    fireEvent.change(qtyInput, { target: { value: "15" } });
+    fireEvent.blur(qtyInput);
+    await waitFor(() => expect(api.requestsFor("PATCH", "/purchase-orders/po1/lines/line1")).toHaveLength(1));
+    expect(JSON.parse(api.requestsFor("PATCH", "/purchase-orders/po1/lines/line1")[0].data as string)).toEqual({
+      quantityOrdered: 15,
+    });
+
+    const removeButtons = screen.getAllByRole("button", { name: "Remove" });
+    expect(removeButtons.every((btn) => !btn.hasAttribute("disabled"))).toBe(true);
+    await user.click(removeButtons[1]);
+    await waitFor(() => expect(api.requestsFor("DELETE", "/purchase-orders/po1/lines/line2")).toHaveLength(1));
+  });
+
+  it("disables removing a purchase order's last remaining line", async () => {
+    mockLookups();
+    api.on("GET", "/purchase-orders", page([draft]));
+    api.on("GET", "/purchase-orders/po1", ok({ ...draft, lines }));
+    const { user } = renderPage();
+    await screen.findByText("Acme Supplies");
+    await user.click(screen.getByRole("button", { name: "View" }));
+    await screen.findByText("Widget");
+
+    expect(screen.getByRole("button", { name: "Remove" })).toBeDisabled();
   });
 });
 

@@ -135,19 +135,27 @@ const patchSchema = z.object({
   notes: z.string().max(1000).optional().nullable(),
 });
 
+// Shared by every route below that mutates a sales order's own fields or its
+// lines: only a DRAFT can be edited, since FULFILLED has already moved stock
+// and CANCELLED is done.
+async function requireDraftSalesOrder(organizationId: string, id: string) {
+  const salesOrder = await prisma.salesOrder.findFirst({ where: { id, organizationId } });
+  if (!salesOrder) {
+    throw ApiError.notFound("Sales order not found");
+  }
+  if (salesOrder.status !== "DRAFT") {
+    throw ApiError.badRequest("Only a draft sales order can be edited");
+  }
+  return salesOrder;
+}
+
 router.patch(
   "/:id",
   asyncHandler(async (req, res) => {
     const body = patchSchema.parse(req.body);
     const organizationId = req.auth!.organizationId;
 
-    const salesOrder = await prisma.salesOrder.findFirst({ where: { id: req.params.id, organizationId } });
-    if (!salesOrder) {
-      throw ApiError.notFound("Sales order not found");
-    }
-    if (salesOrder.status !== "DRAFT") {
-      throw ApiError.badRequest("Only a draft sales order can be edited");
-    }
+    const salesOrder = await requireDraftSalesOrder(organizationId, req.params.id);
     if (body.customerId) {
       const customer = await prisma.customer.findFirst({ where: { id: body.customerId, organizationId } });
       if (!customer) {
@@ -157,6 +165,90 @@ router.patch(
 
     const updated = await prisma.salesOrder.update({ where: { id: salesOrder.id }, data: body });
     res.json(updated);
+  })
+);
+
+// Fixing a mis-keyed draft (wrong product, wrong quantity/price) previously
+// meant cancelling the whole order and recreating it, since only the order's
+// own customer/notes could be patched, not its lines. These three routes
+// close that gap, ungated like every other sales-order route (fulfilling
+// sales orders, and now editing a draft one, is Staff work).
+const lineCreateSchema = z.object({
+  productId: z.string(),
+  quantity: z.number().int().positive(),
+  unitPriceCents: z.number().int().min(0),
+});
+
+router.post(
+  "/:id/lines",
+  asyncHandler(async (req, res) => {
+    const body = lineCreateSchema.parse(req.body);
+    const organizationId = req.auth!.organizationId;
+    const salesOrder = await requireDraftSalesOrder(organizationId, req.params.id);
+
+    const product = await prisma.product.findFirst({ where: { id: body.productId, organizationId } });
+    if (!product) {
+      throw ApiError.badRequest("productId does not belong to this organization");
+    }
+
+    await prisma.salesOrderLine.create({
+      data: {
+        salesOrderId: salesOrder.id,
+        productId: body.productId,
+        quantity: body.quantity,
+        unitPriceCents: body.unitPriceCents,
+      },
+    });
+
+    res.status(201).json(await loadSalesOrderWithLines(organizationId, salesOrder.id));
+  })
+);
+
+const lineUpdateSchema = z.object({
+  quantity: z.number().int().positive().optional(),
+  unitPriceCents: z.number().int().min(0).optional(),
+});
+
+router.patch(
+  "/:id/lines/:lineId",
+  asyncHandler(async (req, res) => {
+    const body = lineUpdateSchema.parse(req.body);
+    const organizationId = req.auth!.organizationId;
+    const salesOrder = await requireDraftSalesOrder(organizationId, req.params.id);
+
+    const line = await prisma.salesOrderLine.findFirst({
+      where: { id: req.params.lineId, salesOrderId: salesOrder.id },
+    });
+    if (!line) {
+      throw ApiError.notFound("Sales order line not found");
+    }
+
+    await prisma.salesOrderLine.update({ where: { id: line.id }, data: body });
+    res.json(await loadSalesOrderWithLines(organizationId, salesOrder.id));
+  })
+);
+
+router.delete(
+  "/:id/lines/:lineId",
+  asyncHandler(async (req, res) => {
+    const organizationId = req.auth!.organizationId;
+    const salesOrder = await requireDraftSalesOrder(organizationId, req.params.id);
+
+    const line = await prisma.salesOrderLine.findFirst({
+      where: { id: req.params.lineId, salesOrderId: salesOrder.id },
+    });
+    if (!line) {
+      throw ApiError.notFound("Sales order line not found");
+    }
+    // Mirrors createSchema's own `lines: z.array(...).min(1)` — an order
+    // with zero lines isn't a smaller order, it's not an order.
+    const lineCount = await prisma.salesOrderLine.count({ where: { salesOrderId: salesOrder.id } });
+    if (lineCount <= 1) {
+      throw ApiError.badRequest("A sales order must have at least one line");
+    }
+
+    await prisma.salesOrderLine.delete({ where: { id: line.id } });
+    res.json(await loadSalesOrderWithLines(organizationId, salesOrder.id));
   })
 );
 

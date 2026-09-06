@@ -9,12 +9,15 @@ import { fetchProducts } from "../api/products";
 import { fetchLocations } from "../api/locations";
 import { isApiError } from "../api/errors";
 import {
+  addPurchaseOrderLine,
   cancelPurchaseOrder,
   createPurchaseOrder,
   fetchPurchaseOrder,
   fetchPurchaseOrders,
   markPurchaseOrderOrdered,
   receivePurchaseOrder,
+  removePurchaseOrderLine,
+  updatePurchaseOrderLine,
 } from "../api/purchaseOrders";
 import type { PurchaseOrderLineInput } from "../api/purchaseOrders";
 import type { Product, PurchaseOrder, PurchaseOrderStatus } from "../api/types";
@@ -46,6 +49,10 @@ interface RowProps {
   onCancel: (id: string) => void;
   onReceiveSubmit: (id: string, locationId: string, lines: { lineId: string; quantity: number }[]) => void;
   receivePending: boolean;
+  onAddLine: (id: string, line: PurchaseOrderLineInput) => void;
+  onUpdateLine: (id: string, lineId: string, patch: Partial<Pick<PurchaseOrderLineInput, "quantityOrdered" | "unitCostCents">>) => void;
+  onRemoveLine: (id: string, lineId: string) => void;
+  lineMutationPending: boolean;
 }
 
 function PurchaseOrderRow({
@@ -61,10 +68,16 @@ function PurchaseOrderRow({
   onCancel,
   onReceiveSubmit,
   receivePending,
+  onAddLine,
+  onUpdateLine,
+  onRemoveLine,
+  lineMutationPending,
 }: RowProps) {
   // Per row, not per page: the receiving form is rendered once for
   // every order, so a shared prefix would put the same id on each.
   const fieldId = useId();
+  const [newLine, setNewLine] = useState<PurchaseOrderLineInput>({ ...emptyLine });
+  const isDraftEditable = isOwner && order.status === "DRAFT";
   const detailQuery = useQuery({
     queryKey: ["purchase-orders", order.id],
     queryFn: () => fetchPurchaseOrder(order.id),
@@ -125,19 +138,121 @@ function PurchaseOrderRow({
                     <th scope="col" className="py-1 text-right">Ordered</th>
                     <th scope="col" className="py-1 text-right">Received</th>
                     {isOwner && <th scope="col" className="py-1 text-right">Unit cost</th>}
+                    {isDraftEditable && <th scope="col" className="py-1 text-right"><span className="sr-only">Actions</span></th>}
                   </tr>
                 </thead>
                 <tbody>
-                  {detailQuery.data.lines?.map((line) => (
-                    <tr key={line.id}>
-                      <td className="py-1">{productName(line.productId)}</td>
-                      <td className="py-1 text-right">{line.quantityOrdered}</td>
-                      <td className="py-1 text-right">{line.quantityReceived}</td>
-                      {isOwner && <td className="py-1 text-right">{formatCents(line.unitCostCents ?? 0)}</td>}
-                    </tr>
-                  ))}
+                  {detailQuery.data.lines?.map((line) =>
+                    isDraftEditable ? (
+                      <tr key={line.id}>
+                        <td className="py-1">{productName(line.productId)}</td>
+                        <td className="py-1 text-right">
+                          <label className="sr-only" htmlFor={`${fieldId}-qty-${line.id}`}>Ordered quantity for {productName(line.productId)}</label>
+                          <input
+                            id={`${fieldId}-qty-${line.id}`}
+                            type="number"
+                            min="1"
+                            defaultValue={line.quantityOrdered}
+                            disabled={lineMutationPending}
+                            onBlur={(e) => {
+                              const value = Number(e.target.value);
+                              if (value > 0 && value !== line.quantityOrdered) {
+                                onUpdateLine(order.id, line.id, { quantityOrdered: value });
+                              } else {
+                                e.target.value = String(line.quantityOrdered);
+                              }
+                            }}
+                            className="w-16 rounded-md border border-gray-300 px-1 py-0.5 text-right text-xs"
+                          />
+                        </td>
+                        <td className="py-1 text-right">{line.quantityReceived}</td>
+                        <td className="py-1 text-right">
+                          <label className="sr-only" htmlFor={`${fieldId}-cost-${line.id}`}>Unit cost for {productName(line.productId)}</label>
+                          <input
+                            id={`${fieldId}-cost-${line.id}`}
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            defaultValue={(line.unitCostCents ?? 0) / 100}
+                            disabled={lineMutationPending}
+                            onBlur={(e) => {
+                              const cents = Math.round(Number(e.target.value) * 100);
+                              if (!Number.isNaN(cents) && cents >= 0 && cents !== line.unitCostCents) {
+                                onUpdateLine(order.id, line.id, { unitCostCents: cents });
+                              } else {
+                                e.target.value = String((line.unitCostCents ?? 0) / 100);
+                              }
+                            }}
+                            className="w-20 rounded-md border border-gray-300 px-1 py-0.5 text-right text-xs"
+                          />
+                        </td>
+                        <td className="py-1 text-right">
+                          <button
+                            type="button"
+                            onClick={() => onRemoveLine(order.id, line.id)}
+                            disabled={lineMutationPending || (detailQuery.data?.lines?.length ?? 0) <= 1}
+                            className="text-red-600 hover:underline disabled:opacity-30"
+                          >
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    ) : (
+                      <tr key={line.id}>
+                        <td className="py-1">{productName(line.productId)}</td>
+                        <td className="py-1 text-right">{line.quantityOrdered}</td>
+                        <td className="py-1 text-right">{line.quantityReceived}</td>
+                        {isOwner && <td className="py-1 text-right">{formatCents(line.unitCostCents ?? 0)}</td>}
+                      </tr>
+                    )
+                  )}
                 </tbody>
               </table>
+            )}
+            {isDraftEditable && (
+              <div className="mt-2 grid grid-cols-12 gap-2">
+                <select
+                  aria-label="Product to add"
+                  value={newLine.productId}
+                  onChange={(e) => setNewLine((current) => ({ ...current, productId: e.target.value }))}
+                  className="col-span-6 rounded-md border border-gray-300 px-2 py-1 text-xs"
+                >
+                  <option value="">Add a line...</option>
+                  {products.map((product) => (
+                    <option key={product.id} value={product.id}>{product.name} ({product.sku})</option>
+                  ))}
+                </select>
+                <input
+                  aria-label="Quantity to add"
+                  type="number"
+                  min="1"
+                  placeholder="Qty"
+                  value={newLine.quantityOrdered}
+                  onChange={(e) => setNewLine((current) => ({ ...current, quantityOrdered: Number(e.target.value) || 1 }))}
+                  className="col-span-2 rounded-md border border-gray-300 px-2 py-1 text-xs"
+                />
+                <input
+                  aria-label="Unit cost to add"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder="Unit cost ($)"
+                  value={newLine.unitCostCents / 100}
+                  onChange={(e) => setNewLine((current) => ({ ...current, unitCostCents: Math.round(Number(e.target.value) * 100) || 0 }))}
+                  className="col-span-3 rounded-md border border-gray-300 px-2 py-1 text-xs"
+                />
+                <button
+                  type="button"
+                  disabled={!newLine.productId || lineMutationPending}
+                  onClick={() => {
+                    onAddLine(order.id, newLine);
+                    setNewLine({ ...emptyLine });
+                  }}
+                  className="col-span-1 text-xs text-brand-600 hover:underline disabled:opacity-30"
+                >
+                  Add
+                </button>
+              </div>
             )}
             {detailQuery.data?.notes && <div className="mt-2 text-xs text-gray-500">Notes: {detailQuery.data.notes}</div>}
           </td>
@@ -269,6 +384,31 @@ export function PurchaseOrdersPage() {
     },
     onError: (err) => {
       setRowError(isApiError(err) ? err.response?.data?.error ?? "Could not receive stock" : "Could not receive stock");
+    },
+  });
+
+  const addLineMutation = useMutation({
+    mutationFn: ({ id, line }: { id: string; line: PurchaseOrderLineInput }) => addPurchaseOrderLine(id, line),
+    onSuccess: (data) => invalidate(data.id),
+    onError: (err) => {
+      setRowError(isApiError(err) ? err.response?.data?.error ?? "Could not add line" : "Could not add line");
+    },
+  });
+
+  const updateLineMutation = useMutation({
+    mutationFn: ({ id, lineId, patch }: { id: string; lineId: string; patch: Partial<Pick<PurchaseOrderLineInput, "quantityOrdered" | "unitCostCents">> }) =>
+      updatePurchaseOrderLine(id, lineId, patch),
+    onSuccess: (data) => invalidate(data.id),
+    onError: (err) => {
+      setRowError(isApiError(err) ? err.response?.data?.error ?? "Could not update line" : "Could not update line");
+    },
+  });
+
+  const removeLineMutation = useMutation({
+    mutationFn: ({ id, lineId }: { id: string; lineId: string }) => removePurchaseOrderLine(id, lineId),
+    onSuccess: (data) => invalidate(data.id),
+    onError: (err) => {
+      setRowError(isApiError(err) ? err.response?.data?.error ?? "Could not remove line" : "Could not remove line");
     },
   });
 
@@ -449,6 +589,19 @@ export function PurchaseOrdersPage() {
                 onCancel={(id) => cancelMutation.mutate(id)}
                 onReceiveSubmit={handleReceiveSubmit}
                 receivePending={receiveMutation.isPending}
+                onAddLine={(id, line) => {
+                  setRowError(null);
+                  addLineMutation.mutate({ id, line });
+                }}
+                onUpdateLine={(id, lineId, patch) => {
+                  setRowError(null);
+                  updateLineMutation.mutate({ id, lineId, patch });
+                }}
+                onRemoveLine={(id, lineId) => {
+                  setRowError(null);
+                  removeLineMutation.mutate({ id, lineId });
+                }}
+                lineMutationPending={addLineMutation.isPending || updateLineMutation.isPending || removeLineMutation.isPending}
               />
             ))}
           </tbody>

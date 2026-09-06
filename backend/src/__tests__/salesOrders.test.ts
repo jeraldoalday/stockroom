@@ -151,4 +151,65 @@ describe("Sales orders API", () => {
     const res = await createDraftSo(tokenA, locationId, productId, 1);
     expect(res.status).toBe(400);
   });
+
+  it("adds, edits, and removes lines on a draft sales order", async () => {
+    const token = await signUpAndGetToken("owner6@shop.test", "The Shop");
+    const { customerId, productId, locationId } = await setUp(token);
+    const so = await createDraftSo(token, locationId, productId, 2, customerId);
+
+    const secondProduct = await request(app)
+      .post("/api/products")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ sku: "SKU-2", name: "Gadget" });
+
+    const added = await request(app)
+      .post(`/api/sales-orders/${so.body.id}/lines`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ productId: secondProduct.body.id, quantity: 1, unitPriceCents: 999 });
+    expect(added.status).toBe(201);
+    expect(added.body.lines).toHaveLength(2);
+    const newLine = added.body.lines.find((l: { productId: string }) => l.productId === secondProduct.body.id);
+
+    const edited = await request(app)
+      .patch(`/api/sales-orders/${so.body.id}/lines/${newLine.id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ quantity: 3 });
+    expect(edited.status).toBe(200);
+    const editedLine = edited.body.lines.find((l: { id: string }) => l.id === newLine.id);
+    expect(editedLine.quantity).toBe(3);
+    expect(editedLine.unitPriceCents).toBe(999);
+
+    const removed = await request(app)
+      .delete(`/api/sales-orders/${so.body.id}/lines/${newLine.id}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(removed.status).toBe(200);
+    expect(removed.body.lines).toHaveLength(1);
+  });
+
+  it("rejects removing a sales order's last remaining line", async () => {
+    const token = await signUpAndGetToken("owner7@shop.test", "The Shop");
+    const { productId, locationId } = await setUp(token);
+    const so = await createDraftSo(token, locationId, productId, 1);
+    const onlyLineId = so.body.lines[0].id;
+
+    const res = await request(app)
+      .delete(`/api/sales-orders/${so.body.id}/lines/${onlyLineId}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(400);
+  });
+
+  it("blocks line edits once the sales order is no longer a draft", async () => {
+    const token = await signUpAndGetToken("owner8@shop.test", "The Shop");
+    const { productId, locationId } = await setUp(token);
+    const so = await createDraftSo(token, locationId, productId, 1);
+    await request(app)
+      .post(`/api/sales-orders/${so.body.id}/fulfill`)
+      .set("Authorization", `Bearer ${token}`);
+
+    const res = await request(app)
+      .post(`/api/sales-orders/${so.body.id}/lines`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ productId, quantity: 1, unitPriceCents: 999 });
+    expect(res.status).toBe(400);
+  });
 });

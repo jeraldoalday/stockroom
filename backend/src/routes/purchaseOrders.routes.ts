@@ -120,6 +120,20 @@ router.post(
   })
 );
 
+// Shared by every route below that mutates a purchase order's own fields or
+// its lines: only a DRAFT can be edited, since ORDERED and later states are
+// what a supplier has already been told, or have started fulfilling.
+async function requireDraftPurchaseOrder(organizationId: string, id: string) {
+  const purchaseOrder = await prisma.purchaseOrder.findFirst({ where: { id, organizationId } });
+  if (!purchaseOrder) {
+    throw ApiError.notFound("Purchase order not found");
+  }
+  if (purchaseOrder.status !== "DRAFT") {
+    throw ApiError.badRequest("Only a draft purchase order can be edited");
+  }
+  return purchaseOrder;
+}
+
 const patchSchema = z.object({
   supplierId: z.string().optional(),
   notes: z.string().max(1000).optional().nullable(),
@@ -132,13 +146,7 @@ router.patch(
     const body = patchSchema.parse(req.body);
     const organizationId = req.auth!.organizationId;
 
-    const purchaseOrder = await prisma.purchaseOrder.findFirst({ where: { id: req.params.id, organizationId } });
-    if (!purchaseOrder) {
-      throw ApiError.notFound("Purchase order not found");
-    }
-    if (purchaseOrder.status !== "DRAFT") {
-      throw ApiError.badRequest("Only a draft purchase order can be edited");
-    }
+    const purchaseOrder = await requireDraftPurchaseOrder(organizationId, req.params.id);
     if (body.supplierId) {
       const supplier = await prisma.supplier.findFirst({ where: { id: body.supplierId, organizationId } });
       if (!supplier) {
@@ -148,6 +156,92 @@ router.patch(
 
     const updated = await prisma.purchaseOrder.update({ where: { id: purchaseOrder.id }, data: body });
     res.json(updated);
+  })
+);
+
+const lineCreateSchema = z.object({
+  productId: z.string(),
+  quantityOrdered: z.number().int().positive(),
+  unitCostCents: z.number().int().min(0),
+});
+
+// Fixing a mis-keyed draft (wrong product, wrong quantity) previously meant
+// cancelling the whole order and recreating it from scratch, since only the
+// order's own supplier/notes could be patched, not its lines. These three
+// routes close that gap, gated and scoped exactly like the PATCH above.
+router.post(
+  "/:id/lines",
+  requireRole("OWNER"),
+  asyncHandler(async (req, res) => {
+    const body = lineCreateSchema.parse(req.body);
+    const organizationId = req.auth!.organizationId;
+    const purchaseOrder = await requireDraftPurchaseOrder(organizationId, req.params.id);
+
+    const product = await prisma.product.findFirst({ where: { id: body.productId, organizationId } });
+    if (!product) {
+      throw ApiError.badRequest("productId does not belong to this organization");
+    }
+
+    await prisma.purchaseOrderLine.create({
+      data: {
+        purchaseOrderId: purchaseOrder.id,
+        productId: body.productId,
+        quantityOrdered: body.quantityOrdered,
+        unitCostCents: body.unitCostCents,
+      },
+    });
+
+    res.status(201).json(await loadPurchaseOrderWithLines(organizationId, purchaseOrder.id));
+  })
+);
+
+const lineUpdateSchema = z.object({
+  quantityOrdered: z.number().int().positive().optional(),
+  unitCostCents: z.number().int().min(0).optional(),
+});
+
+router.patch(
+  "/:id/lines/:lineId",
+  requireRole("OWNER"),
+  asyncHandler(async (req, res) => {
+    const body = lineUpdateSchema.parse(req.body);
+    const organizationId = req.auth!.organizationId;
+    const purchaseOrder = await requireDraftPurchaseOrder(organizationId, req.params.id);
+
+    const line = await prisma.purchaseOrderLine.findFirst({
+      where: { id: req.params.lineId, purchaseOrderId: purchaseOrder.id },
+    });
+    if (!line) {
+      throw ApiError.notFound("Purchase order line not found");
+    }
+
+    await prisma.purchaseOrderLine.update({ where: { id: line.id }, data: body });
+    res.json(await loadPurchaseOrderWithLines(organizationId, purchaseOrder.id));
+  })
+);
+
+router.delete(
+  "/:id/lines/:lineId",
+  requireRole("OWNER"),
+  asyncHandler(async (req, res) => {
+    const organizationId = req.auth!.organizationId;
+    const purchaseOrder = await requireDraftPurchaseOrder(organizationId, req.params.id);
+
+    const line = await prisma.purchaseOrderLine.findFirst({
+      where: { id: req.params.lineId, purchaseOrderId: purchaseOrder.id },
+    });
+    if (!line) {
+      throw ApiError.notFound("Purchase order line not found");
+    }
+    // Mirrors createSchema's own `lines: z.array(...).min(1)` — an order
+    // with zero lines isn't a smaller order, it's not an order.
+    const lineCount = await prisma.purchaseOrderLine.count({ where: { purchaseOrderId: purchaseOrder.id } });
+    if (lineCount <= 1) {
+      throw ApiError.badRequest("A purchase order must have at least one line");
+    }
+
+    await prisma.purchaseOrderLine.delete({ where: { id: line.id } });
+    res.json(await loadPurchaseOrderWithLines(organizationId, purchaseOrder.id));
   })
 );
 

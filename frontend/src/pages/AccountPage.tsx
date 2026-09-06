@@ -266,6 +266,7 @@ export function AccountPage() {
         )}
         {sessionsQuery.data && sessionsQuery.data.length > 0 && (
           <table className="min-w-full divide-y divide-gray-200 text-sm">
+            <caption className="sr-only">Your active sessions</caption>
             <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
               <tr>
                 <th scope="col" className="px-4 py-2">Device</th>

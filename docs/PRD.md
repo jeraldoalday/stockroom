@@ -308,8 +308,20 @@ blocking for a design-partner pilot:
   pair is now joined by a `useId()`-derived id. The confirmation dialog
   also gained a focus trap: `aria-modal` had been doing nothing about the
   Tab key, so two Tabs put a keyboard user on the row button behind an open
-  modal. A broader accessibility pass — colour contrast, `aria-live` for
-  the inline error banners, table semantics — has not been done.
+  modal.
+- ~~**A broader accessibility pass — colour contrast, `aria-live` for the
+  inline error banners, table semantics — has not been done.**~~
+  **Resolved (Day 26, with a follow-up on Day 33):** this line itself went
+  stale — Day 26 shipped `role="alert"`/`role="status"` on every inline
+  banner, `scope="col"` on every `<th>`, and a colour-contrast sweep
+  (switching the one real failure, `text-gray-400`, to `text-gray-500`)
+  three days before this bullet was written and left unstruck. Day 33
+  confirmed all three against the running app and found two real gaps Day
+  26 didn't reach: 3 more `text-gray-400` spots added by later sessions
+  after Day 26's sweep ran, and no table anywhere having an accessible name
+  for screen-reader table-navigation commands. Fixed both — the 3 spots
+  switched to `text-gray-500`, and a `<caption className="sr-only">` added
+  to all 21 tables across every list and report page.
 - Per-location reorder points and per-location STAFF scoping: both
   explicitly deferred (§12).
 

@@ -54,7 +54,7 @@ function lineVariance(line: StocktakeLine): number | null {
 function VarianceCell({ line }: { line: StocktakeLine }) {
   const variance = lineVariance(line);
   if (variance === null) {
-    return <span className="text-gray-400">Not counted</span>;
+    return <span className="text-gray-500">Not counted</span>;
   }
   if (variance === 0) {
     return <span className="text-gray-500">Matches</span>;
@@ -204,6 +204,7 @@ function StocktakeSheet({ stocktakeId, isOwner, onError, onCompleted }: SheetPro
         )}
       </div>
       <table className="min-w-full text-xs">
+        <caption className="sr-only">Count sheet</caption>
         <thead>
           <tr className="text-gray-500">
             <th scope="col" className="py-1 text-left">Product</th>
@@ -225,7 +226,7 @@ function StocktakeSheet({ stocktakeId, isOwner, onError, onCompleted }: SheetPro
             <tr key={line.id}>
               <td className="py-1">
                 {line.product?.name ?? line.productId}
-                {line.product?.sku && <span className="ml-1 text-gray-400">({line.product.sku})</span>}
+                {line.product?.sku && <span className="ml-1 text-gray-500">({line.product.sku})</span>}
               </td>
               <td className="py-1 text-right text-gray-500">{line.expectedQty}</td>
               <td className="py-1 text-right">
@@ -487,6 +488,7 @@ export function StocktakesPage() {
 
       <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
         <table className="min-w-full divide-y divide-gray-200 text-sm">
+          <caption className="sr-only">Stocktakes</caption>
           <thead className="bg-gray-50">
             <tr>
               <th scope="col" className="px-4 py-2 text-left font-medium text-gray-600">Location</th>

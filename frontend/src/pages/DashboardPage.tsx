@@ -65,6 +65,7 @@ export function DashboardPage() {
           <h2 className="text-lg font-semibold text-gray-900">Low stock</h2>
           <div className="mt-3 overflow-hidden rounded-lg border border-gray-200 bg-white">
             <table className="min-w-full divide-y divide-gray-200 text-sm">
+              <caption className="sr-only">Low stock</caption>
               <thead className="bg-gray-50">
                 <tr>
                   <th scope="col" className="px-4 py-2 text-left font-medium text-gray-600">Product</th>
@@ -106,6 +107,7 @@ export function DashboardPage() {
           <h2 className="text-lg font-semibold text-gray-900">Recent activity</h2>
           <div className="mt-3 overflow-hidden rounded-lg border border-gray-200 bg-white">
             <table className="min-w-full divide-y divide-gray-200 text-sm">
+              <caption className="sr-only">Recent activity</caption>
               <thead className="bg-gray-50">
                 <tr>
                   <th scope="col" className="px-4 py-2 text-left font-medium text-gray-600">Product</th>
@@ -150,6 +152,7 @@ export function DashboardPage() {
         </div>
         <div className="mt-3 overflow-hidden rounded-lg border border-gray-200 bg-white">
           <table className="min-w-full divide-y divide-gray-200 text-sm">
+            <caption className="sr-only">Top movers</caption>
             <thead className="bg-gray-50">
               <tr>
                 <th scope="col" className="px-4 py-2 text-left font-medium text-gray-600">Product</th>

@@ -118,6 +118,7 @@ function PurchaseOrderRow({
             {detailQuery.isLoading && <div className="text-xs text-gray-500">Loading...</div>}
             {detailQuery.data && (
               <table className="min-w-full text-xs">
+                <caption className="sr-only">Order lines for {order.supplier?.name ?? "this supplier"}</caption>
                 <thead>
                   <tr className="text-gray-500">
                     <th scope="col" className="py-1 text-left">Product</th>
@@ -411,6 +412,7 @@ export function PurchaseOrdersPage() {
 
       <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
         <table className="min-w-full divide-y divide-gray-200 text-sm">
+          <caption className="sr-only">Purchase orders</caption>
           <thead className="bg-gray-50">
             <tr>
               <th scope="col" className="px-4 py-2 text-left font-medium text-gray-600">Supplier</th>

@@ -136,6 +136,7 @@ export function TeamPage() {
 
       <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
         <table className="min-w-full divide-y divide-gray-200 text-sm">
+          <caption className="sr-only">Team members</caption>
           <thead className="bg-gray-50">
             <tr>
               <th scope="col" className="px-4 py-2 text-left font-medium text-gray-600">Name</th>

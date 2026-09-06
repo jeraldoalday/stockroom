@@ -161,6 +161,7 @@ export function ReportsPage() {
         {reorderQuery.data && reorderQuery.data.items.length > 0 && (
           <div className="mt-3 overflow-x-auto">
             <table className="min-w-full text-sm">
+              <caption className="sr-only">Reorder suggestions</caption>
               <thead>
                 <tr className="text-left text-gray-500">
                   {isOwner && <th scope="col" className="py-1.5 pr-4"><span className="sr-only">Select</span></th>}
@@ -258,6 +259,7 @@ export function ReportsPage() {
               </div>
               <div className="mt-3 overflow-x-auto">
                 <table className="min-w-full text-sm">
+                  <caption className="sr-only">Dead stock</caption>
                   <thead>
                     <tr className="text-left text-gray-500">
                       <th scope="col" className="py-1.5 pr-4">Product</th>

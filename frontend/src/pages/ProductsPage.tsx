@@ -75,6 +75,7 @@ function ProductHistoryPanel({ productId }: { productId: string }) {
   return (
     <div className="space-y-3 px-4 py-3">
       <table className="min-w-full text-xs">
+        <caption className="sr-only">Stocktake count history</caption>
         <thead>
           <tr className="text-gray-500">
             <th scope="col" className="py-1 text-left">Counted</th>
@@ -94,7 +95,7 @@ function ProductHistoryPanel({ productId }: { productId: string }) {
               <td className="py-1 text-right">{entry.countedQty}</td>
               <td className="py-1 text-right">
                 {entry.appliedDelta === null ? (
-                  <span className="text-gray-400">Not applied yet</span>
+                  <span className="text-gray-500">Not applied yet</span>
                 ) : (
                   <span className={entry.appliedDelta === 0 ? "text-gray-500" : entry.appliedDelta > 0 ? "text-green-700" : "text-red-600"}>
                     {entry.appliedDelta > 0 ? "+" : ""}
@@ -474,6 +475,7 @@ export function ProductsPage() {
 
       <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
         <table className="min-w-full divide-y divide-gray-200 text-sm">
+          <caption className="sr-only">Products</caption>
           <thead className="bg-gray-50">
             <tr>
               <th scope="col" className="px-4 py-2 text-left font-medium text-gray-600">SKU</th>

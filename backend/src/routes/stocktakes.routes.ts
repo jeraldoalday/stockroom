@@ -4,7 +4,7 @@ import { prisma } from "../lib/prisma";
 import { asyncHandler } from "../lib/asyncHandler";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { ApiError } from "../lib/errors";
-import { toCsv } from "../lib/csv";
+import { toCsv, sanitizeCsvText } from "../lib/csv";
 import { requireStockableLocation } from "../lib/locations";
 import { PUBLIC_USER_SELECT } from "../lib/rbac";
 import { applyStocktake, assertOpen, planStocktakeLines, requireStocktake } from "../lib/stocktake";
@@ -247,12 +247,12 @@ router.get(
       ...sheet.lines.map((line) => {
         const variance = lineVariance(line);
         return [
-          line.product?.sku ?? "",
-          line.product?.name ?? line.productId,
+          sanitizeCsvText(line.product?.sku ?? ""),
+          sanitizeCsvText(line.product?.name ?? line.productId),
           String(line.expectedQty),
           line.countedQty === null ? "" : String(line.countedQty),
           variance === null ? "" : String(variance),
-          line.countedBy?.name ?? "",
+          sanitizeCsvText(line.countedBy?.name ?? ""),
           line.countedAt ? new Date(line.countedAt).toISOString() : "",
         ];
       }),

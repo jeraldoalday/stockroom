@@ -99,3 +99,16 @@ function formatCsvField(value: string): string {
 export function toCsv(rows: string[][]): string {
   return rows.map((row) => row.map(formatCsvField).join(",")).join("\r\n") + "\r\n";
 }
+
+// CSV injection (CWE-1236): Excel/Sheets treats a cell starting with `=`,
+// `+`, `-`, `@`, or a tab/CR as a formula, regardless of this API's own
+// `text/csv` content type. The export this feeds writes free-text fields a
+// Staff member controls (a product's SKU/name, the counter's own display
+// name) next to computed numbers reformatted as strings (Expected/Counted/
+// Variance, which legitimately start with `-`) — so unlike `formatCsvField`
+// above, this isn't applied to every cell, only called out at the call
+// site's free-text columns, to avoid mangling a negative variance into text
+// that reads `'-3` instead of `-3`.
+export function sanitizeCsvText(value: string): string {
+  return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+}

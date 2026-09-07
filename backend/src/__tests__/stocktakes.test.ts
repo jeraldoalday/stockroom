@@ -5,6 +5,7 @@ jest.mock("../lib/prisma");
 import { resetPrismaMock } from "./testUtils/prismaMock";
 import { inviteAndSetPassword } from "./testUtils/invite";
 import { createApp } from "../app";
+import { parseCsvRecords } from "../lib/csv";
 
 const app = createApp();
 
@@ -558,6 +559,42 @@ describe("Stocktakes API", () => {
       // -8 (7 - 15 on-hand), and the export must show the real correction.
       const [, row] = res.text.trim().split("\r\n");
       expect(row.split(",").slice(0, 6)).toEqual(["SKU-STOCKED", "Apple Sauce", "10", "7", "-8", "Owner"]);
+    });
+
+    it("defuses a product name/SKU that would read as a spreadsheet formula, without touching a real negative variance", async () => {
+      // Excel/Sheets treats a cell starting with `=`, `+`, `-`, or `@` as a
+      // formula regardless of this API's own text/csv content type, and a
+      // Staff member can freely set a product's SKU or name to anything --
+      // there's no character restriction. Whoever opens this export is an
+      // Owner, so an unsanitized SKU/name is a way for a lower-trust user to
+      // run a formula in a higher-trust one's spreadsheet the moment they
+      // open the file (see `sanitizeCsvText` in lib/csv.ts).
+      const token = await signUpAndGetToken("owner@shop.test", "The Shop");
+      const locations = await request(app).get("/api/locations").set("Authorization", `Bearer ${token}`);
+      const locationId = locations.body[0].id as string;
+      const product = await request(app)
+        .post("/api/products")
+        .set("Authorization", `Bearer ${token}`)
+        .send({ sku: "=cmd|' /C calc'!A0", name: '=HYPERLINK("http://evil.example/","steal")' });
+      await request(app)
+        .post("/api/stock-movements")
+        .set("Authorization", `Bearer ${token}`)
+        .send({ productId: product.body.id, locationId, type: "RECEIVE", quantity: 10 });
+      const sheet = await createStocktake(token, { locationId });
+      await countLine(token, sheet.body.id, sheet.body.lines[0].id, 3);
+
+      const res = await exportSheet(token, sheet.body.id);
+
+      // Parsed through the app's own CSV reader, not a naive split(",") --
+      // the malicious name itself contains commas and quotes, which is
+      // exactly the kind of field formatCsvField has to quote correctly on
+      // top of sanitizeCsvText's own prefix.
+      const [record] = parseCsvRecords(res.text);
+      expect(record.SKU).toBe("'=cmd|' /C calc'!A0");
+      expect(record.Product).toBe('\'=HYPERLINK("http://evil.example/","steal")');
+      // A genuinely negative computed field (3 counted - 10 expected) must
+      // stay a plain "-7", not gain a defusing quote of its own.
+      expect(record.Variance).toBe("-7");
     });
 
     it("exposes Content-Disposition across origins, so the browser can read the filename", async () => {

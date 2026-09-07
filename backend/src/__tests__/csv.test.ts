@@ -1,4 +1,4 @@
-import { parseCsvRecords, toCsv } from "../lib/csv";
+import { parseCsvRecords, sanitizeCsvText, toCsv } from "../lib/csv";
 
 describe("toCsv", () => {
   it("joins rows and columns with commas and CRLF, RFC 4180 style", () => {
@@ -31,5 +31,25 @@ describe("toCsv", () => {
       { SKU: "SKU-1", Name: "Widgets, Large" },
       { SKU: "SKU-2", Name: '12" pipe' },
     ]);
+  });
+});
+
+describe("sanitizeCsvText", () => {
+  it.each([
+    ['=cmd|" /C calc"!A0', "formula"],
+    ["+SUM(1,2)", "plus"],
+    ["-2+3+cmd", "minus"],
+    ["@evil", "at"],
+    ["\ttabbed", "tab"],
+  ])("prefixes a %s-leading value with a defusing quote (%s)", (value) => {
+    expect(sanitizeCsvText(value)).toBe(`'${value}`);
+  });
+
+  it("leaves an ordinary value untouched", () => {
+    expect(sanitizeCsvText("Apple Sauce")).toBe("Apple Sauce");
+  });
+
+  it("leaves an empty value untouched", () => {
+    expect(sanitizeCsvText("")).toBe("");
   });
 });

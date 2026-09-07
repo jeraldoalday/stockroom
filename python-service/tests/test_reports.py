@@ -114,6 +114,70 @@ def test_export_movements_returns_csv(monkeypatch):
     assert captured["since"] is not None
 
 
+# CSV injection (CWE-1236): a Staff member controls a product's name/SKU and
+# a movement's own free-text `reason`; an Owner is who opens the export in
+# Excel/Sheets. A cell starting with `=`/`+`/`-`/`@` is read as a formula by
+# those apps no matter what content type this API sends, so every such value
+# must come back prefixed with a defusing `'` — and a legitimate negative
+# number in the same export (movements' own `quantity`) must not be touched,
+# since it's a native `int`, never a stringified one, by the time it reaches
+# `_csv_response`.
+def test_export_products_neutralizes_a_formula_leading_name(monkeypatch):
+    monkeypatch.setattr(
+        "app.routers.reports.fetch_products_rows",
+        lambda conn, organization_id: [
+            {
+                "sku": "=cmd|' /C calc'!A0",
+                "name": "+SUM(1,2)",
+                "category": "@evil",
+                "cost_cents": 500,
+                "price_cents": 999,
+                "reorder_point": 5,
+                "reorder_qty": 20,
+                "is_active": True,
+            }
+        ],
+    )
+    res = client.get("/export/products", params={"organization_id": "org_1"}, headers=HEADERS)
+    assert res.status_code == 200
+    assert "'=cmd|' /C calc'!A0" in res.text
+    assert "'+SUM(1,2)" in res.text
+    assert "'@evil" in res.text
+
+
+def test_export_movements_neutralizes_a_formula_leading_reason_but_not_a_negative_quantity(monkeypatch):
+    monkeypatch.setattr(
+        "app.routers.reports.fetch_movement_rows",
+        lambda conn, organization_id, since: [
+            {
+                "created_at": "2026-08-15T00:00:00Z",
+                "sku": "WIDGET-1",
+                "product_name": "Widget",
+                "location": "Main",
+                "type": "SALE",
+                "quantity": -3,
+                "reason": '=HYPERLINK("http://evil.example/","steal")',
+            }
+        ],
+    )
+    res = client.get("/export/movements", params={"organization_id": "org_1"}, headers=HEADERS)
+    assert res.status_code == 200
+    assert "'=HYPERLINK" in res.text
+    # The quantity is a real negative int, not a stringified number the
+    # sanitizer could mistake for a dangerous leading `-`.
+    assert ",-3," in res.text or res.text.strip().endswith("-3")
+
+
+def test_export_dead_stock_neutralizes_a_formula_leading_name(monkeypatch):
+    monkeypatch.setattr(
+        "app.routers.reports.fetch_dead_stock",
+        lambda conn, organization_id, since: [_dead_stock_row(name="-2+3+cmd")],
+    )
+    res = client.get("/export/dead-stock", params={"organization_id": "org_1"}, headers=HEADERS)
+    assert res.status_code == 200
+    assert "'-2+3+cmd" in res.text
+
+
 def test_sales_stock_trend_returns_series_and_totals(monkeypatch):
     monkeypatch.setattr(
         "app.routers.reports.fetch_sales_stock_trend",

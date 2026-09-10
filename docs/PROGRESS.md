@@ -3250,3 +3250,110 @@ dropped, Postgres cluster stopped, `.env` files removed.
   everything to strings before it reaches `toCsv`, where a blanket rule
   would misfire on a legitimate negative variance. Each fix matches the
   shape of the data it actually sees.
+
+## Day 35 (post-MVP) — 2026-09-10
+
+**Planned:** local `main` was already in sync with `origin/main` at session
+start (no stale-branch cleanup needed this time, unlike several recent
+entries). Day 34's own "Next" list had nothing newly actionable (frontend
+error reporting and Staff per-location scoping remain blocked on
+infrastructure/a design partner), so this session opened with a fresh gap
+sweep and found a real, previously-unaddressed correctness gap: an archived
+product could still be written onto every new stock activity in the system.
+
+**A candidate considered and rejected first, worth recording so it isn't
+re-proposed:** a background sweep initially flagged that
+`purchaseOrders.routes.ts`/`salesOrders.routes.ts` never check
+`Supplier.isActive`/`Customer.isActive` before attaching one to a new or
+edited order, unlike `requireStockableLocation`'s archived-location guard.
+Reading `schema.prisma`'s own comment on `Location.isActive` before acting
+on this turned up that the asymmetry is intentional, not missed: "Unlike a
+supplier, an archived location is also refused for new stock... it is a
+place goods physically are." Day 17's entry (line ~1200) makes the same
+point about locations versus suppliers/customers directly. A supplier or
+customer is a label on an order, not a place stock has to be findable at,
+so leaving an archived one usable on a new order was a considered choice.
+Product, by contrast, is never mentioned in that comment as belonging to
+either side of the distinction — and it turned out to belong with Location,
+not with Supplier/Customer, for exactly the same physical reason.
+
+**Shipped — archived products refused on every new write:**
+
+`DELETE /api/products/:id` (Day 15) has always refused to archive a product
+that is on an open purchase or sales order, with the reasoning spelled out
+in a comment: receiving against a hidden SKU would let stock "silently
+reappear... that no list shows." That block only ever ran at archive time.
+Nothing stopped the opposite direction — naming an *already*-archived
+product on a brand-new write — because every route that resolves a
+`productId` re-validated tenancy on its own
+(`prisma.product.findFirst({ where: { id, organizationId } })`) and never
+asked whether the product was still active:
+
+- `POST /api/stock-movements` and `/transfer` (RECEIVE/SALE/ADJUSTMENT/
+  transfer) — confirmed with a real Postgres before fixing: archiving a
+  product and then `POST`ing a RECEIVE against it succeeded and moved real
+  stock, invisibly, since the dashboard's stock-value/low-stock queries and
+  `planStocktakeLines` both already filter to `isActive: true` — the
+  quantity existed in `inventory_items` and the audit trail but appeared in
+  no aggregate anywhere.
+- `POST /api/purchase-orders` and `POST /:id/lines` (create + add-line to a
+  draft).
+- `POST /api/sales-orders` and `POST /:id/lines` (same, sales side).
+- `POST /api/stocktakes/:id/lines` (manually adding a product to an open
+  count) — `planStocktakeLines` already excludes archived products from the
+  auto-generated sheet with an explicit comment saying why; the manual
+  add-line endpoint was the one path that didn't inherit that rule.
+- New `backend/src/lib/products.ts`: `requireActiveProduct`, one function
+  used at all six call sites above, matching `requireStockableLocation`'s
+  existing shape exactly (same signature, same "does it belong to this org,
+  then is it active" order, same customizable `field` name for the error
+  message) since it's solving the identical class of problem for a second
+  entity. Left every *read* path alone on purpose — history, the raw
+  inventory list, and an order already on the books all still show an
+  archived product's past, which is real and worth keeping visible.
+- 9 new backend tests (`productsArchive.test.ts`): one per call site above,
+  plus confirming the ordinary active-product path is unaffected at two of
+  the six sites (implicitly covered at the rest by every pre-existing test
+  in `purchaseOrders.test.ts`/`salesOrders.test.ts`/etc. continuing to pass
+  unmodified).
+
+**Verified beyond the test suite, against real Postgres + a running
+backend:** signed up, created a product, archived it, and confirmed
+`POST /api/stock-movements` with `type: RECEIVE` against it now 400s with
+"productId refers to an archived product" (previously returned 201 and
+posted real stock); then repeated signup → create → archive with a fresh
+product and confirmed the same RECEIVE and a purchase-order creation
+against a second, still-active product both still succeed (201), ruling out
+a false-positive on the ordinary path. Did not stand up the frontend for
+this session — no frontend file changed, since every product-picking
+`<select>` (`StockMovementsPage`, `PurchaseOrdersPage`, `SalesOrdersPage`,
+`StocktakesPage`) already calls `fetchProducts` with no `status` override,
+which defaults server-side to `active` — confirmed by reading each call
+site rather than assumed, since that's exactly the kind of claim worth
+checking before deciding a backend-only fix needs no UI counterpart.
+
+**Verified (all three services):** backend `npx tsc --noEmit`, `npm run
+lint`, full Jest suite (430/430, up from 423 — 9 new); frontend `npm run
+lint`, `tsc -b`, `npm test` (440/440, unchanged), `npm run build`;
+python-service `python3 -m pytest -q` (50/50, unaffected — no file touched
+this session). All clean. Real local Postgres (`pg_ctlcluster 16 main
+start`, created the `stockroom` role/db and `stockroom_readonly` role from
+scratch), migrations applied, backend dev server run against it for the
+curl verification above, then torn down.
+
+**Next:**
+
+1. Still open, low urgency and unchanged across many entries: frontend
+   error reporting (no external sink) and Staff per-location scoping (no
+   design partner) — neither newly actionable this session either.
+2. No other fresh gaps surfaced this session worth adding to the list.
+
+**Blockers/decisions carried forward:**
+
+- None new. `requireActiveProduct` intentionally does not fold into
+  `requireStockableLocation` or vice versa despite the near-identical
+  shape — they guard two different entities for two different reasons (a
+  place stock has to be findable at, versus a catalogue item that has been
+  discontinued), and a generic "require this record active" helper would
+  need a lookup table of Prisma delegates for a two-line body that isn't
+  actually shared logic beyond the shape of the check.

@@ -168,3 +168,142 @@ describe("Product archiving", () => {
     expect(res.status).toBe(409);
   });
 });
+
+// The reverse direction from the block above: once a product IS archived,
+// nothing stopped a *new* write from naming it anyway — a stock movement, a
+// transfer, a fresh order or order line, a stocktake line. Same "stock
+// quietly moves against an SKU no list shows" problem archiving exists to
+// prevent, just reached the other way around.
+describe("Archived products refused on new writes", () => {
+  it("rejects a stock movement against an archived product", async () => {
+    const { auth, productId } = await setup();
+    const locations = await request(app).get("/api/locations").set(auth);
+    await request(app).delete(`/api/products/${productId}`).set(auth);
+
+    const res = await request(app)
+      .post("/api/stock-movements")
+      .set(auth)
+      .send({ productId, locationId: locations.body[0].id, type: "RECEIVE", quantity: 5 });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/archived product/i);
+  });
+
+  it("rejects a transfer of an archived product", async () => {
+    const { auth, productId } = await setup();
+    const locations = await request(app).get("/api/locations").set(auth);
+    await request(app).post("/api/locations").set(auth).send({ name: "Second" });
+    const refreshed = await request(app).get("/api/locations").set(auth);
+    await request(app).delete(`/api/products/${productId}`).set(auth);
+
+    const res = await request(app)
+      .post("/api/stock-movements/transfer")
+      .set(auth)
+      .send({
+        productId,
+        fromLocationId: locations.body[0].id,
+        toLocationId: refreshed.body.find((l: { id: string }) => l.id !== locations.body[0].id).id,
+        quantity: 1,
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/archived product/i);
+  });
+
+  it("rejects creating a purchase order for an archived product", async () => {
+    const { auth, productId } = await setup();
+    await request(app).delete(`/api/products/${productId}`).set(auth);
+    const supplier = await request(app).post("/api/suppliers").set(auth).send({ name: "Acme" });
+
+    const res = await request(app)
+      .post("/api/purchase-orders")
+      .set(auth)
+      .send({
+        supplierId: supplier.body.id,
+        lines: [{ productId, quantityOrdered: 10, unitCostCents: 500 }],
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/archived product/i);
+  });
+
+  it("rejects adding a line for an archived product to a draft purchase order", async () => {
+    const { auth, productId } = await setup();
+    const other = await request(app)
+      .post("/api/products")
+      .set(auth)
+      .send({ sku: "WIDGET-2", name: "Other", priceCents: 500 });
+    const supplier = await request(app).post("/api/suppliers").set(auth).send({ name: "Acme" });
+    const po = await request(app)
+      .post("/api/purchase-orders")
+      .set(auth)
+      .send({
+        supplierId: supplier.body.id,
+        lines: [{ productId: other.body.id, quantityOrdered: 5, unitCostCents: 100 }],
+      });
+    await request(app).delete(`/api/products/${productId}`).set(auth);
+
+    const res = await request(app)
+      .post(`/api/purchase-orders/${po.body.id}/lines`)
+      .set(auth)
+      .send({ productId, quantityOrdered: 5, unitCostCents: 100 });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/archived product/i);
+  });
+
+  it("rejects creating a sales order for an archived product", async () => {
+    const { auth, productId } = await setup();
+    const locations = await request(app).get("/api/locations").set(auth);
+    await request(app).delete(`/api/products/${productId}`).set(auth);
+
+    const res = await request(app)
+      .post("/api/sales-orders")
+      .set(auth)
+      .send({
+        locationId: locations.body[0].id,
+        lines: [{ productId, quantity: 2, unitPriceCents: 1999 }],
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/archived product/i);
+  });
+
+  it("rejects adding a line for an archived product to a draft sales order", async () => {
+    const { auth, productId } = await setup();
+    const other = await request(app)
+      .post("/api/products")
+      .set(auth)
+      .send({ sku: "WIDGET-2", name: "Other", priceCents: 500 });
+    const locations = await request(app).get("/api/locations").set(auth);
+    const so = await request(app)
+      .post("/api/sales-orders")
+      .set(auth)
+      .send({
+        locationId: locations.body[0].id,
+        lines: [{ productId: other.body.id, quantity: 1, unitPriceCents: 500 }],
+      });
+    await request(app).delete(`/api/products/${productId}`).set(auth);
+
+    const res = await request(app)
+      .post(`/api/sales-orders/${so.body.id}/lines`)
+      .set(auth)
+      .send({ productId, quantity: 1, unitPriceCents: 500 });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/archived product/i);
+  });
+
+  it("rejects adding an archived product to an open stocktake", async () => {
+    const { auth, productId } = await setup();
+    const locations = await request(app).get("/api/locations").set(auth);
+    await request(app).delete(`/api/products/${productId}`).set(auth);
+
+    const stocktake = await request(app)
+      .post("/api/stocktakes")
+      .set(auth)
+      .send({ locationId: locations.body[0].id, scope: "all-products" });
+    expect(stocktake.status).toBe(201);
+
+    const res = await request(app)
+      .post(`/api/stocktakes/${stocktake.body.id}/lines`)
+      .set(auth)
+      .send({ productId });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/archived product/i);
+  });
+});

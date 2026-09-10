@@ -5,6 +5,7 @@ import { asyncHandler } from "../lib/asyncHandler";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { ApiError } from "../lib/errors";
 import { requireStockableLocation } from "../lib/locations";
+import { requireActiveProduct } from "../lib/products";
 import { applyMovementDelta } from "../lib/inventory";
 
 const router = Router();
@@ -90,10 +91,7 @@ router.post(
       throw ApiError.badRequest("supplierId does not belong to this organization");
     }
     for (const line of body.lines) {
-      const product = await prisma.product.findFirst({ where: { id: line.productId, organizationId } });
-      if (!product) {
-        throw ApiError.badRequest(`productId ${line.productId} does not belong to this organization`);
-      }
+      await requireActiveProduct(organizationId, line.productId, `productId ${line.productId}`);
     }
 
     const result = await prisma.$transaction(async (tx) => {
@@ -177,10 +175,7 @@ router.post(
     const organizationId = req.auth!.organizationId;
     const purchaseOrder = await requireDraftPurchaseOrder(organizationId, req.params.id);
 
-    const product = await prisma.product.findFirst({ where: { id: body.productId, organizationId } });
-    if (!product) {
-      throw ApiError.badRequest("productId does not belong to this organization");
-    }
+    await requireActiveProduct(organizationId, body.productId);
 
     await prisma.purchaseOrderLine.create({
       data: {

@@ -6,6 +6,7 @@ import { requireAuth, requireRole } from "../middleware/auth";
 import { ApiError } from "../lib/errors";
 import { toCsv, sanitizeCsvText } from "../lib/csv";
 import { requireStockableLocation } from "../lib/locations";
+import { requireActiveProduct } from "../lib/products";
 import { PUBLIC_USER_SELECT } from "../lib/rbac";
 import { applyStocktake, assertOpen, planStocktakeLines, requireStocktake } from "../lib/stocktake";
 
@@ -351,10 +352,7 @@ router.post(
     const stocktake = await requireStocktake(organizationId, req.params.id);
     assertOpen(stocktake.status, "added to");
 
-    const product = await prisma.product.findFirst({ where: { id: body.productId, organizationId } });
-    if (!product) {
-      throw ApiError.badRequest("productId does not belong to this organization");
-    }
+    const product = await requireActiveProduct(organizationId, body.productId);
     const duplicate = await prisma.stocktakeLine.findFirst({
       where: { stocktakeId: stocktake.id, productId: product.id },
     });

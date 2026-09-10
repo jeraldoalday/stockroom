@@ -6,6 +6,7 @@ import { requireAuth } from "../middleware/auth";
 import { ApiError } from "../lib/errors";
 import { applyMovementDelta } from "../lib/inventory";
 import { requireStockableLocation } from "../lib/locations";
+import { requireActiveProduct } from "../lib/products";
 import { PUBLIC_USER_SELECT } from "../lib/rbac";
 
 const router = Router();
@@ -18,10 +19,9 @@ async function assertProductAndLocation(
   locationField = "locationId"
 ) {
   const [product, location] = await Promise.all([
-    prisma.product.findFirst({ where: { id: productId, organizationId } }),
+    requireActiveProduct(organizationId, productId),
     requireStockableLocation(organizationId, locationId, locationField),
   ]);
-  if (!product) throw ApiError.badRequest("productId does not belong to this organization");
   return { product, location };
 }
 

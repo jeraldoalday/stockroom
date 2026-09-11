@@ -3357,3 +3357,93 @@ curl verification above, then torn down.
   discontinued), and a generic "require this record active" helper would
   need a lookup table of Prisma delegates for a two-line body that isn't
   actually shared logic beyond the shape of the check.
+
+## Day 36 (post-MVP) — 2026-09-11
+
+**Planned:** local `main` was already in sync with `origin/main` at session
+start. Day 35's "Next" list had nothing newly actionable (frontend error
+reporting and Staff per-location scoping remain blocked on infrastructure/a
+design partner), so this session opened with its own gap sweep and found a
+real, previously-unaddressed correctness bug in purchase-order receiving: a
+single receiving request naming the same line twice could inflate real
+inventory beyond what was ordered.
+
+**Shipped — reject a duplicate line id within one receiving request:**
+
+`POST /api/purchase-orders/:id/receive` (`purchaseOrders.routes.ts`) accepts
+an array of `{ lineId, quantity }` receipts. The pre-write validation loop
+checks each receipt's `quantity` against `remaining = quantityOrdered -
+quantityReceived`, but both the validation loop and the write transaction
+read that figure from `lineById`, a `Map` snapshotted once from the database
+*before* either loop runs — it is never updated as receipts within the same
+request are processed. Two receipts naming the same `lineId` therefore both
+passed the remaining-quantity check against the same stale snapshot, and
+both posted their own `RECEIVE` stock movement in the transaction (inventory
+incremented twice), while `purchaseOrderLine.update`'s
+`quantityReceived: line.quantityReceived + receipt.quantity` computed from
+that same stale `line` meant only the *last* duplicate's increment actually
+stuck — so the line's own `quantityReceived` (and therefore whether the
+order reads as fully `RECEIVED`) silently understated how much stock had
+really been added. Confirmed with a real Postgres before fixing: a
+10-unit line hit with two `{lineId, quantity: 6}` receipts in one request
+posted two `RECEIVE` movements for 12 units total against a line that can
+only ever legitimately take 10.
+
+- Added a duplicate-`lineId` check at the top of the route — `400` before
+  any DB read if the same `lineId` appears more than once in `body.lines` —
+  rather than silently summing repeated entries into one receipt. A real
+  receiving session never has a reason to name the same line twice in one
+  submission (the UI already sends one entry per line), so rejecting is
+  simpler and safer than trying to make the per-line accounting correct
+  under repetition.
+- 1 new backend test: a duplicate-`lineId` receive request 400s, and neither
+  inventory nor the line's `quantityReceived` moved as a result — followed
+  by confirming a normal single-entry partial receive on the same line still
+  succeeds and updates both correctly.
+- Looked for the same shape of bug on the sales-order side
+  (`POST /:id/fulfill`) first: it fulfills every line on the order in one
+  pass with no client-supplied line array to repeat, so this class of bug
+  has no equivalent there.
+
+**Verified beyond the test suite, against real Postgres + a running
+backend:** signed up, created a supplier/product/10-unit draft PO, ordered
+it, then `POST`ed the exact exploit shape (`lines: [{lineId, quantity: 6},
+{lineId, quantity: 6}]`) and confirmed it now 400s with "Each line can only
+appear once per receiving request" and `GET /inventory` still shows zero
+rows at that location; then `POST`ed a normal single `{lineId, quantity: 6}`
+receive on the same order and confirmed it still succeeds (200,
+`PARTIALLY_RECEIVED`, `quantityReceived: 6`).
+
+**Verified (all three services):** backend `npx tsc --noEmit`, `npm run
+lint`, full Jest suite (431/431, up from 430 — 1 new); frontend `npm run
+lint`, `tsc -b`, `npm test`, `npm run build` (unchanged — no frontend file
+touched this session); python-service `pytest -q` (50/50, unaffected — no
+file touched this session). All clean. Real local Postgres
+(`pg_ctlcluster 16 main start`, created the `stockroom` role/db from
+scratch), migrations applied, backend run against it for the curl
+verification above, then torn down (server killed, database and role
+dropped, cluster stopped).
+
+**Next:**
+
+1. Still open, low urgency and unchanged across many entries: frontend
+   error reporting (no external sink) and Staff per-location scoping (no
+   design partner) — neither newly actionable this session either.
+2. A candidate considered and set aside as minor, not urgent: the
+   duplicate-name checks on category create/rename and location create/
+   rename (`categories.routes.ts`, `locations.routes.ts`) compare names
+   case-sensitively, while every search/list filter in those same files
+   already uses `mode: "insensitive"`. Lets "Warehouse" and "warehouse"
+   exist side by side in the same picker — a data-quality/UX gap, not a
+   correctness or security one (stock/audit data stays right either way) —
+   worth a small follow-up pass whenever one of those two files is touched
+   again for something else.
+
+**Blockers/decisions carried forward:**
+
+- None new. Chose outright rejection of a repeated `lineId` over summing
+  repeated entries into one cumulative receipt: summing would fix the
+  accounting but adds a second code path (per-line accumulation across the
+  batch) for a shape of request no real client ever needs to send, since
+  the existing frontend already sends exactly one entry per line per
+  receiving submission.

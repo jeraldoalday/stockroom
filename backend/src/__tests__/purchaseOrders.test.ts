@@ -149,6 +149,39 @@ describe("Purchase orders API", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects a receiving request that names the same line twice", async () => {
+    const token = await signUpAndGetToken("owner4b@shop.test", "The Shop");
+    const { supplierId, productId, locationId } = await setUp(token);
+    const po = await createDraftPo(token, supplierId, productId, 10);
+    await request(app)
+      .post(`/api/purchase-orders/${po.body.id}/order`)
+      .set("Authorization", `Bearer ${token}`);
+
+    const res = await request(app)
+      .post(`/api/purchase-orders/${po.body.id}/receive`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        locationId,
+        lines: [
+          { lineId: po.body.lines[0].id, quantity: 6 },
+          { lineId: po.body.lines[0].id, quantity: 6 },
+        ],
+      });
+    expect(res.status).toBe(400);
+
+    // Confirm the rejected request didn't partially apply: no stock moved
+    // and the line's received quantity is untouched.
+    const inventory = await request(app)
+      .get(`/api/inventory?locationId=${locationId}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(inventory.body.items).toHaveLength(0);
+
+    const detail = await request(app)
+      .get(`/api/purchase-orders/${po.body.id}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(detail.body.lines[0].quantityReceived).toBe(0);
+  });
+
   it("cancels a draft purchase order", async () => {
     const token = await signUpAndGetToken("owner5@shop.test", "The Shop");
     const { supplierId, productId } = await setUp(token);

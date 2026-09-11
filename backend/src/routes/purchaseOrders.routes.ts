@@ -297,6 +297,19 @@ router.post(
     const organizationId = req.auth!.organizationId;
     const actorId = req.auth!.userId;
 
+    // Each entry checks and updates `quantityReceived` against the same
+    // pre-loop snapshot of the line (see `lineById` below), so a repeated
+    // `lineId` would pass the remaining-quantity check twice against the
+    // same stale figure and post a RECEIVE movement for each occurrence —
+    // inflating real inventory beyond what was ordered while
+    // `quantityReceived` only reflects the last of the duplicates. Reject
+    // it outright rather than silently summing, since a legitimate receipt
+    // never needs to name the same line twice in one request.
+    const lineIds = body.lines.map((line) => line.lineId);
+    if (new Set(lineIds).size !== lineIds.length) {
+      throw ApiError.badRequest("Each line can only appear once per receiving request");
+    }
+
     const purchaseOrder = await prisma.purchaseOrder.findFirst({ where: { id: req.params.id, organizationId } });
     if (!purchaseOrder) {
       throw ApiError.notFound("Purchase order not found");

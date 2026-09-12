@@ -66,6 +66,25 @@ router.patch(
       throw ApiError.notFound("Category not found");
     }
 
+    // POST / already refuses a duplicate name at create time; a rename can
+    // hit the same `@@unique([organizationId, name])` index (which, like
+    // Location's, covers archived rows too) and previously fell straight
+    // through to it, surfacing as the generic P2002-mapped 409 in
+    // errorHandler.ts ("A record with this organizationId, name already
+    // exists") instead of this route's own friendly message.
+    if (body.name && body.name !== category.name) {
+      const nameTaken = await prisma.category.findFirst({
+        where: { organizationId, name: body.name, NOT: { id: category.id } },
+      });
+      if (nameTaken) {
+        throw ApiError.conflict(
+          nameTaken.isActive
+            ? "A category with this name already exists"
+            : "An archived category already uses this name — restore or rename it"
+        );
+      }
+    }
+
     const updated = await prisma.category.update({
       where: { id: category.id },
       data: body,

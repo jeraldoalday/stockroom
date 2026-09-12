@@ -126,3 +126,49 @@ describe("Archiving a category", () => {
     expect(row.categoryId).toBe(id);
   });
 });
+
+// PATCH /:id previously skipped straight to `prisma.category.update`, so a
+// rename onto an already-used name only ever hit the database's own
+// `@@unique([organizationId, name])` index — surfacing as the generic
+// P2002-mapped 409 in errorHandler.ts instead of this route's own message,
+// unlike POST / (checked below) and unlike locations.routes.ts's PATCH,
+// which already guards its own rename the same way.
+describe("Renaming a category", () => {
+  it("rejects a rename onto a name already used by another active category", async () => {
+    const auth = await signUp();
+    await createCategory(auth, "Beverages");
+    const snacksId = await createCategory(auth, "Snacks");
+
+    const res = await request(app).patch(`/api/categories/${snacksId}`).set(auth).send({ name: "Beverages" });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe("A category with this name already exists");
+  });
+
+  it("rejects a rename onto a name already used by an archived category, with a distinct message", async () => {
+    const auth = await signUp();
+    const beveragesId = await createCategory(auth, "Beverages");
+    await request(app).delete(`/api/categories/${beveragesId}`).set(auth);
+    const snacksId = await createCategory(auth, "Snacks");
+
+    const res = await request(app).patch(`/api/categories/${snacksId}`).set(auth).send({ name: "Beverages" });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe("An archived category already uses this name — restore or rename it");
+  });
+
+  it("allows renaming a category to its own current name", async () => {
+    const auth = await signUp();
+    const id = await createCategory(auth, "Beverages");
+
+    const res = await request(app).patch(`/api/categories/${id}`).set(auth).send({ name: "Beverages" });
+    expect(res.status).toBe(200);
+  });
+
+  it("still allows an ordinary rename to an unused name", async () => {
+    const auth = await signUp();
+    const id = await createCategory(auth, "Beverages");
+
+    const res = await request(app).patch(`/api/categories/${id}`).set(auth).send({ name: "Drinks" });
+    expect(res.status).toBe(200);
+    expect(res.body.name).toBe("Drinks");
+  });
+});

@@ -44,6 +44,22 @@ describe("Products API", () => {
     expect(list.body.items[0].sku).toBe("SKU-1");
   });
 
+  // costCents/priceCents/reorderPoint/reorderQty all back a Postgres `Int`
+  // (int4, max 2,147,483,647) column. Zod's `.int()` alone only rejects a
+  // fractional number, not an oversized one — without an explicit `.max()`
+  // this value would pass validation and crash the write with a raw,
+  // untranslated Prisma error instead of an ordinary 400.
+  it("rejects a costCents too large to fit the underlying Int column", async () => {
+    const token = await signUpAndGetToken("owner-overflow@shop.test", "Overflow Shop");
+
+    const res = await request(app)
+      .post("/api/products")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ sku: "SKU-OVERFLOW", name: "Too Expensive", costCents: 99999999999 });
+
+    expect(res.status).toBe(400);
+  });
+
   it("rejects a duplicate SKU within the same organization", async () => {
     const token = await signUpAndGetToken("owner2@shop.test", "The Shop 2");
 

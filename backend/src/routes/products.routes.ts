@@ -5,6 +5,7 @@ import { asyncHandler } from "../lib/asyncHandler";
 import { requireAuth } from "../middleware/auth";
 import { ApiError } from "../lib/errors";
 import { parseCsvRecords } from "../lib/csv";
+import { MAX_INT4 } from "../lib/validation";
 
 const router = Router();
 router.use(requireAuth);
@@ -76,10 +77,10 @@ const productSchema = z.object({
   name: z.string().min(1).max(200),
   description: z.string().max(2000).optional(),
   categoryId: z.string().optional().nullable(),
-  costCents: z.number().int().min(0).default(0),
-  priceCents: z.number().int().min(0).default(0),
-  reorderPoint: z.number().int().min(0).default(0),
-  reorderQty: z.number().int().min(0).default(0),
+  costCents: z.number().int().min(0).max(MAX_INT4).default(0),
+  priceCents: z.number().int().min(0).max(MAX_INT4).default(0),
+  reorderPoint: z.number().int().min(0).max(MAX_INT4).default(0),
+  reorderQty: z.number().int().min(0).max(MAX_INT4).default(0),
 });
 
 async function assertCategoryBelongsToOrg(categoryId: string | null | undefined, organizationId: string) {
@@ -130,11 +131,20 @@ interface ImportRowError {
 function parseNonNegativeInt(value: string, field: string, rowNumber: number, errors: ImportRowError[]): number | undefined {
   if (!value) return undefined;
   const asDollars = Number(value);
-  if (Number.isNaN(asDollars) || asDollars < 0) {
+  if (!Number.isFinite(asDollars) || asDollars < 0) {
     errors.push({ row: rowNumber, message: `${field} must be a non-negative number` });
     return undefined;
   }
-  return field === "cost" || field === "price" ? Math.round(asDollars * 100) : Math.round(asDollars);
+  const result = field === "cost" || field === "price" ? Math.round(asDollars * 100) : Math.round(asDollars);
+  // Without this, a stray digit or bad formula result in one cell overflows
+  // the destination `Int` column and crashes the whole import mid-way
+  // (see MAX_INT4's comment) instead of being recorded as one bad row among
+  // otherwise-independent ones.
+  if (result > MAX_INT4) {
+    errors.push({ row: rowNumber, message: `${field} is too large` });
+    return undefined;
+  }
+  return result;
 }
 
 // F10: CSV import of products. Runs through the Node API (not the Python

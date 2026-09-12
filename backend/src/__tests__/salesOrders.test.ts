@@ -72,6 +72,17 @@ describe("Sales orders API", () => {
     expect(res.body.lines).toHaveLength(1);
   });
 
+  // quantity/unitPriceCents back a Postgres `Int` column; without an
+  // explicit upper bound an oversized value would pass Zod's `.int()` check
+  // and crash the write at the database instead of failing validation.
+  it("rejects a quantity too large to fit the underlying Int column", async () => {
+    const token = await signUpAndGetToken("owner-overflow@shop.test", "Overflow Shop");
+    const { customerId, productId, locationId } = await setUp(token);
+
+    const res = await createDraftSo(token, locationId, productId, 99999999999, customerId);
+    expect(res.status).toBe(400);
+  });
+
   it("fulfills a draft, decrementing stock and posting a SALE movement", async () => {
     const token = await signUpAndGetToken("owner2@shop.test", "The Shop");
     const { productId, locationId } = await setUp(token);

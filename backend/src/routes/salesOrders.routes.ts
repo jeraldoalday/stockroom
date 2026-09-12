@@ -7,6 +7,7 @@ import { ApiError } from "../lib/errors";
 import { requireStockableLocation } from "../lib/locations";
 import { requireActiveProduct } from "../lib/products";
 import { applyMovementDelta } from "../lib/inventory";
+import { MAX_INT4 } from "../lib/validation";
 
 const router = Router();
 router.use(requireAuth);
@@ -70,8 +71,8 @@ router.get(
 
 const lineInputSchema = z.object({
   productId: z.string(),
-  quantity: z.number().int().positive(),
-  unitPriceCents: z.number().int().min(0),
+  quantity: z.number().int().positive().max(MAX_INT4),
+  unitPriceCents: z.number().int().min(0).max(MAX_INT4),
 });
 
 const createSchema = z.object({
@@ -173,8 +174,8 @@ router.patch(
 // sales orders, and now editing a draft one, is Staff work).
 const lineCreateSchema = z.object({
   productId: z.string(),
-  quantity: z.number().int().positive(),
-  unitPriceCents: z.number().int().min(0),
+  quantity: z.number().int().positive().max(MAX_INT4),
+  unitPriceCents: z.number().int().min(0).max(MAX_INT4),
 });
 
 router.post(
@@ -200,8 +201,8 @@ router.post(
 );
 
 const lineUpdateSchema = z.object({
-  quantity: z.number().int().positive().optional(),
-  unitPriceCents: z.number().int().min(0).optional(),
+  quantity: z.number().int().positive().max(MAX_INT4).optional(),
+  unitPriceCents: z.number().int().min(0).max(MAX_INT4).optional(),
 });
 
 router.patch(

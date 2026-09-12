@@ -67,6 +67,27 @@ describe("Stock movements API", () => {
     expect(inventory.body.items[0].quantity).toBe(20);
   });
 
+  // quantity backs a Postgres `Int` column (also true, symmetrically, of an
+  // oversized negative ADJUSTMENT); without an explicit bound on both sides
+  // an out-of-range value would pass Zod's `.int()` check and crash the
+  // write at the database instead of failing validation.
+  it("rejects a quantity too large to fit the underlying Int column", async () => {
+    const token = await signUpAndGetToken("owner-overflow@shop.test", "Overflow Shop");
+    const { productId, mainLocationId } = await setUpProductAndLocations(token);
+
+    const tooLarge = await request(app)
+      .post("/api/stock-movements")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ productId, locationId: mainLocationId, type: "RECEIVE", quantity: 99999999999 });
+    expect(tooLarge.status).toBe(400);
+
+    const tooNegative = await request(app)
+      .post("/api/stock-movements")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ productId, locationId: mainLocationId, type: "ADJUSTMENT", quantity: -99999999999, reason: "count" });
+    expect(tooNegative.status).toBe(400);
+  });
+
   it("SALE decreases quantity and blocks an over-sell", async () => {
     const token = await signUpAndGetToken("owner2@shop.test", "The Shop");
     const { productId, mainLocationId } = await setUpProductAndLocations(token);

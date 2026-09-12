@@ -9,6 +9,7 @@ import { requireStockableLocation } from "../lib/locations";
 import { requireActiveProduct } from "../lib/products";
 import { PUBLIC_USER_SELECT } from "../lib/rbac";
 import { applyStocktake, assertOpen, planStocktakeLines, requireStocktake } from "../lib/stocktake";
+import { MAX_INT4 } from "../lib/validation";
 
 const router = Router();
 router.use(requireAuth);
@@ -374,7 +375,7 @@ router.post(
 const countSchema = z.object({
   // Null clears a figure entered by mistake, putting the line back to
   // "not counted" — which is not the same as counting it to zero.
-  countedQty: z.number().int().min(0).nullable(),
+  countedQty: z.number().int().min(0).max(MAX_INT4).nullable(),
 });
 
 router.patch(

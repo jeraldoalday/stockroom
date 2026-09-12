@@ -7,6 +7,7 @@ import { ApiError } from "../lib/errors";
 import { requireStockableLocation } from "../lib/locations";
 import { requireActiveProduct } from "../lib/products";
 import { applyMovementDelta } from "../lib/inventory";
+import { MAX_INT4 } from "../lib/validation";
 
 const router = Router();
 router.use(requireAuth);
@@ -67,8 +68,8 @@ router.get(
 
 const lineInputSchema = z.object({
   productId: z.string(),
-  quantityOrdered: z.number().int().positive(),
-  unitCostCents: z.number().int().min(0),
+  quantityOrdered: z.number().int().positive().max(MAX_INT4),
+  unitCostCents: z.number().int().min(0).max(MAX_INT4),
 });
 
 const createSchema = z.object({
@@ -159,8 +160,8 @@ router.patch(
 
 const lineCreateSchema = z.object({
   productId: z.string(),
-  quantityOrdered: z.number().int().positive(),
-  unitCostCents: z.number().int().min(0),
+  quantityOrdered: z.number().int().positive().max(MAX_INT4),
+  unitCostCents: z.number().int().min(0).max(MAX_INT4),
 });
 
 // Fixing a mis-keyed draft (wrong product, wrong quantity) previously meant
@@ -191,8 +192,8 @@ router.post(
 );
 
 const lineUpdateSchema = z.object({
-  quantityOrdered: z.number().int().positive().optional(),
-  unitCostCents: z.number().int().min(0).optional(),
+  quantityOrdered: z.number().int().positive().max(MAX_INT4).optional(),
+  unitCostCents: z.number().int().min(0).max(MAX_INT4).optional(),
 });
 
 router.patch(
@@ -284,7 +285,7 @@ router.post(
 
 const receiveSchema = z.object({
   locationId: z.string(),
-  lines: z.array(z.object({ lineId: z.string(), quantity: z.number().int().positive() })).min(1),
+  lines: z.array(z.object({ lineId: z.string(), quantity: z.number().int().positive().max(MAX_INT4) })).min(1),
 });
 
 // Receiving is a Staff task: it posts RECEIVE stock movements and advances

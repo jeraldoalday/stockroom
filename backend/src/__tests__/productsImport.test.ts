@@ -98,6 +98,36 @@ describe("POST /api/products/import", () => {
     expect(res.body.errors[1].row).toBe(3);
   });
 
+  // Regression test: a row with a cost too large for the destination `Int`
+  // column used to reach `prisma.product.create`/`.update` unchecked and
+  // crash the whole request with a raw 500 (no `errors` body, and — worse —
+  // rows processed before the bad one had already committed), breaking the
+  // "rows are processed independently" contract described above the route.
+  // It must now be recorded as a per-row error like any other bad cell,
+  // leaving every other row unaffected.
+  it("records an oversized cost as a per-row error instead of crashing the import", async () => {
+    const token = await signUpAndGetToken("owner-overflow@shop.test", "Overflow Shop");
+    const csv = [
+      "sku,name,cost",
+      "SKU-BEFORE,Fine Before,5.00",
+      "SKU-OVERFLOW,Too Expensive,99999999999",
+      "SKU-AFTER,Fine After,6.00",
+    ].join("\n");
+
+    const res = await request(app)
+      .post("/api/products/import")
+      .set("Authorization", `Bearer ${token}`)
+      .set("Content-Type", "text/csv")
+      .send(csv);
+
+    expect(res.status).toBe(200);
+    expect(res.body.created).toBe(2);
+    expect(res.body.errors).toEqual([{ row: 3, message: "cost is too large" }]);
+
+    const list = await request(app).get("/api/products").set("Authorization", `Bearer ${token}`);
+    expect(list.body.total).toBe(2);
+  });
+
   it("never lets one organization's import affect another's products (tenant isolation)", async () => {
     const tokenA = await signUpAndGetToken("ownerA@shop.test", "Shop A");
     const tokenB = await signUpAndGetToken("ownerB@shop.test", "Shop B");

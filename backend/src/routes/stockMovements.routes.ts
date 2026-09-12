@@ -8,6 +8,7 @@ import { applyMovementDelta } from "../lib/inventory";
 import { requireStockableLocation } from "../lib/locations";
 import { requireActiveProduct } from "../lib/products";
 import { PUBLIC_USER_SELECT } from "../lib/rbac";
+import { MAX_INT4 } from "../lib/validation";
 
 const router = Router();
 router.use(requireAuth);
@@ -71,13 +72,15 @@ const movementSchema = z.object({
   quantity: z
     .number()
     .int()
+    .min(-MAX_INT4)
+    .max(MAX_INT4)
     .refine((v) => v !== 0, "quantity must not be zero"),
   // What the goods actually sold for. Optional so the existing callers keep
   // working, and rejected outright on anything but a SALE — a "unit price"
   // on a stock receipt or a shrinkage write-off has no meaning, and quietly
   // storing one would put a number in the audit trail that the reports
   // would then have to decide whether to believe.
-  unitPriceCents: z.number().int().min(0).optional(),
+  unitPriceCents: z.number().int().min(0).max(MAX_INT4).optional(),
   reason: z.string().min(1).max(500).optional(),
 });
 
@@ -132,7 +135,7 @@ const transferSchema = z.object({
   productId: z.string(),
   fromLocationId: z.string(),
   toLocationId: z.string(),
-  quantity: z.number().int().positive(),
+  quantity: z.number().int().positive().max(MAX_INT4),
   reason: z.string().max(500).optional(),
 });
 

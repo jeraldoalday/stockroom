@@ -3447,3 +3447,125 @@ dropped, cluster stopped).
   batch) for a shape of request no real client ever needs to send, since
   the existing frontend already sends exactly one entry per line per
   receiving submission.
+
+## Day 37 (post-MVP) — 2026-09-12
+
+**Planned:** local `main` was behind `origin/main` by four commits at
+session start (this container's clone predated Days 35-36 landing on the
+remote) — fast-forwarded before doing anything else. Day 36's "Next" list
+had nothing newly actionable, so this session opened with a fresh gap
+sweep and found a real, previously-unaddressed correctness bug: every
+quantity/price field validated with Zod's `.int()` had no upper bound, so
+a value too large for its destination Postgres `Int` column passed
+validation and crashed the write instead of failing it cleanly.
+
+**Shipped — bound every quantity/price Zod field to fit its `Int` column:**
+
+Every cost/price/quantity/reorder field across `products.routes.ts`,
+`purchaseOrders.routes.ts`, `salesOrders.routes.ts`, `stockMovements.routes.ts`,
+and `stocktakes.routes.ts` maps to a plain Postgres `Int` column (int4, max
+2,147,483,647) in `schema.prisma`. Zod's `.int()` only rejects a fractional
+number, not an oversized one, so `{"costCents": 99999999999}` sailed
+through `productSchema.parse` and reached `prisma.product.create`, which
+threw `PrismaClientUnknownRequestError: Unable to fit integer value ...
+into an INT4`. That error code isn't P2002/P2003/P2025, so
+`errorHandler.ts`'s `translatePrismaError` has no case for it and it fell
+through to a bare, unhelpful `500`.
+
+Confirmed against a real Postgres (this sandbox had none yet — built the
+`stockroom` role/db from scratch, applied migrations, tore both down after)
+that this was worse than an ugly error code on the CSV import path
+specifically: `POST /api/products/import` documents itself as processing
+"rows independently: a bad row is recorded in errors and skipped rather
+than aborting the whole import." A 3-row CSV with an oversized `cost` in
+the middle row used to 500 with no `{created, updated, errors}` body at
+all — and the row *before* the bad one had already committed, silently
+breaking that documented guarantee. `parseNonNegativeInt` (the CSV-specific
+parser, separate from the Zod schema used by the JSON API) had the same
+gap and needed the same fix.
+
+- New `backend/src/lib/validation.ts` exporting `MAX_INT4 = 2_147_483_647`,
+  used as `.max(MAX_INT4)` on every such Zod field (fifteen call sites
+  across the five route files above) and as the same bound inside
+  `parseNonNegativeInt`. `stockMovements.routes.ts`'s ADJUSTMENT quantity
+  can be negative, so it gets `.min(-MAX_INT4).max(MAX_INT4)` instead of a
+  one-sided bound.
+- 6 new backend tests: one per route file confirming the 400 (or, for
+  import, the correctly-scoped per-row error alongside two other rows that
+  still succeed), verified live afterward against the real Postgres above —
+  both the direct `POST /api/products` 400 and, more importantly, the CSV
+  import case (`SKU-BEFORE`/`SKU-OVERFLOW`/`SKU-AFTER`) now returning `200`
+  with `{"created":2,"errors":[{"row":3,"message":"cost is too large"}]}`
+  and both good rows present in the resulting product list, instead of a
+  crash and one silently-committed row.
+
+**Shipped — a category rename also checks for a duplicate name:**
+
+Found while touching this area: `POST /api/categories` has always checked
+for an existing `{organizationId, name}` category before creating one, but
+`PATCH /api/categories/:id` skipped straight to `prisma.category.update`
+with no equivalent check — unlike `locations.routes.ts`'s PATCH, which
+already guards its own rename the same way `POST /api/locations` does.
+Renaming a category onto a name already in use (active or archived; the
+`@@unique([organizationId, name])` index covers both, same as Location's)
+fell through to `errorHandler.ts`'s generic P2002 mapping and echoed raw
+column names back (`"A record with this organizationId, name already
+exists"`) instead of a route-appropriate message.
+
+- Added the same check `locations.routes.ts`'s PATCH already uses: skip
+  entirely if `name` isn't changing, otherwise look for another category
+  (`NOT: { id: category.id }`) with that name and 409 with a message that
+  distinguishes an active clash from an archived one ("restore or rename
+  it"), matching Location's own wording exactly since it's the same shape
+  of problem.
+- Did **not** touch the case-sensitivity of either check (Day 36 flagged
+  this already and deliberately deferred it as its own, separate, minor
+  follow-up — not conflating it with this fix).
+- 4 new backend tests in `categoryArchive.test.ts` (new "Renaming a
+  category" block): active-duplicate 409, archived-duplicate 409 with the
+  distinct message, renaming to one's own current name still succeeds, and
+  an ordinary rename to a genuinely free name still succeeds. Verified live
+  against the same real Postgres instance (rebuilt `dist/` first after
+  discovering a stale build was masking the fix on the first verification
+  pass — worth remembering: `npm run build` output can look identical
+  whether or not it actually ran, so check the compiled file's mtime, not
+  just the exit code, before trusting a live verification against it).
+
+**Verified (all three services):** backend `npx tsc --noEmit`, `npm run
+lint`, full Jest suite (440/440, up from 431 — 6 + 4 new); frontend `npm
+run build` (unchanged — no frontend file touched this session, `npm ci`
+and `tsc -b && vite build` both clean); python-service `pytest -q` (50/50,
+unaffected — no file touched this session). All clean. Real local Postgres
+used twice this session (once per fix, per the note above), each time
+built from scratch (`pg_ctlcluster 16 main start`, fresh `stockroom` role/
+db, migrations applied) and torn down after (server killed, database and
+role dropped, cluster stopped, `.env` removed) — confirmed no leftover
+`stockroom` database/role and no leftover `node dist/server.js` process
+after the final teardown.
+
+**Next:**
+
+1. Still open, low urgency and unchanged across many entries: frontend
+   error reporting (no external sink) and Staff per-location scoping (no
+   design partner) — neither newly actionable this session either.
+2. Still deferred from Day 36: the duplicate-name checks on category and
+   location create/rename compare names case-sensitively while every
+   search/list filter elsewhere already uses `mode: "insensitive"`. A
+   data-quality/UX gap, not a correctness or security one — worth folding
+   in next time either of those two files is touched again.
+3. No other fresh gaps surfaced this session worth adding to the list.
+
+**Blockers/decisions carried forward:**
+
+- None new. `MAX_INT4` lives in a small new `lib/validation.ts` rather than
+  being inlined at each of the fifteen call sites, since the same bound is
+  the right answer everywhere it's used (it's a property of the Postgres
+  column type, not of any one route's business logic) — a shared constant
+  says that once instead of fifteen unexplained magic numbers.
+- Chose `.max(MAX_INT4)` (reject outright) over silently clamping an
+  oversized value down to the column's max, for the same reason Day 36
+  chose outright rejection over summing a repeated receiving line: clamping
+  a client-supplied number down to whatever fits is a surprising, silent
+  correction, and Zod's existing validation-failure shape (a 400 naming the
+  offending field) is already the right way to tell a caller "this value is
+  invalid," not just "this value is negative or fractional."

@@ -2,6 +2,7 @@ import request from "supertest";
 
 jest.mock("../lib/prisma");
 
+import { prisma } from "../lib/prisma";
 import { resetPrismaMock } from "./testUtils/prismaMock";
 import { inviteAndSetPassword } from "./testUtils/invite";
 import { createApp } from "../app";
@@ -158,6 +159,57 @@ describe("Purchase orders API", () => {
       .set("Authorization", `Bearer ${token}`)
       .send({ locationId, lines: [{ lineId: po.body.lines[0].id, quantity: 6 }] });
     expect(res.status).toBe(400);
+  });
+
+  // The remaining-quantity check ahead of the transaction reads its own
+  // snapshot of the line, same as applyMovementDelta used to before it was
+  // made atomic (see lib/inventory.ts) — so a second receipt that read the
+  // line before a first one committed could pass that check on stale
+  // numbers. Real concurrent requests can't be reproduced against this
+  // in-memory mock (see rateLimit.test.ts's note on hitRateLimit), so the
+  // stale read is reproduced directly: fake the pre-transaction lookup
+  // into reporting the line as still fully unreceived, as it would have
+  // looked before another receipt actually landed, and confirm the
+  // in-transaction updateMany guard still catches it against the real
+  // current row rather than trusting that stale snapshot.
+  it("rejects a receipt that would overreceive a line even when the pre-check read a stale snapshot", async () => {
+    const token = await signUpAndGetToken("owner4c@shop.test", "The Shop");
+    const { supplierId, productId, locationId } = await setUp(token);
+    const po = await createDraftPo(token, supplierId, productId, 10);
+    await request(app)
+      .post(`/api/purchase-orders/${po.body.id}/order`)
+      .set("Authorization", `Bearer ${token}`);
+
+    const firstReceive = await request(app)
+      .post(`/api/purchase-orders/${po.body.id}/receive`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ locationId, lines: [{ lineId: po.body.lines[0].id, quantity: 6 }] });
+    expect(firstReceive.status).toBe(200);
+
+    const staleLine = { ...po.body.lines[0], quantityReceived: 0 };
+    jest.spyOn(prisma.purchaseOrderLine, "findMany").mockResolvedValueOnce([staleLine] as never);
+
+    const secondReceive = await request(app)
+      .post(`/api/purchase-orders/${po.body.id}/receive`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ locationId, lines: [{ lineId: po.body.lines[0].id, quantity: 6 }] });
+    expect(secondReceive.status).toBe(400);
+
+    (prisma.purchaseOrderLine.findMany as jest.Mock).mockRestore();
+
+    // Rejected, so nothing from the second request applied: still only the
+    // first receipt's 6 units on hand and on the line, not 6 (lost update)
+    // or 12 (double-applied inventory with an under-reported line).
+    const inventory = await request(app)
+      .get(`/api/inventory?locationId=${locationId}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(inventory.body.items[0].quantity).toBe(6);
+
+    const detail = await request(app)
+      .get(`/api/purchase-orders/${po.body.id}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(detail.body.lines[0].quantityReceived).toBe(6);
+    expect(detail.body.status).toBe("PARTIALLY_RECEIVED");
   });
 
   it("rejects a receiving request that names the same line twice", async () => {

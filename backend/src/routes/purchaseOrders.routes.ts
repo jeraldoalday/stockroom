@@ -342,6 +342,33 @@ router.post(
     await prisma.$transaction(async (tx) => {
       for (const receipt of body.lines) {
         const line = lineById.get(receipt.lineId)!;
+
+        // Same race applyMovementDelta itself guards against: the
+        // remaining-quantity check above ran against the pre-loop snapshot,
+        // so two concurrent /receive requests against the same line could
+        // both pass it, then both plain-update `quantityReceived` with the
+        // second overwriting the first's write instead of compounding it —
+        // silently losing track of stock that was, per applyMovementDelta
+        // below, genuinely added to inventory. Fold the guard and the
+        // increment into one updateMany() the same way, so Postgres checks
+        // the row as it stands when the statement runs rather than as it
+        // stood when this request started. quantityOrdered is safe to read
+        // from that same stale snapshot: a line's quantityOrdered can't
+        // change once its purchase order has left DRAFT
+        // (requireDraftPurchaseOrder gates every line edit), and this route
+        // requires ORDERED or PARTIALLY_RECEIVED to be reached at all. Runs
+        // before applyMovementDelta so a receipt this guard rejects never
+        // touches inventory in the first place.
+        const receivedUpdate = await tx.purchaseOrderLine.updateMany({
+          where: { id: line.id, quantityReceived: { lte: line.quantityOrdered - receipt.quantity } },
+          data: { quantityReceived: { increment: receipt.quantity } },
+        });
+        if (receivedUpdate.count === 0) {
+          throw ApiError.badRequest(
+            `Cannot receive ${receipt.quantity} units for line ${line.id}; another receipt already used up what remained`
+          );
+        }
+
         await applyMovementDelta(tx, {
           organizationId,
           productId: line.productId,
@@ -359,10 +386,6 @@ router.post(
             purchaseOrderId: purchaseOrder.id,
             reason: `Receiving PO ${purchaseOrder.id}`,
           },
-        });
-        await tx.purchaseOrderLine.update({
-          where: { id: line.id },
-          data: { quantityReceived: line.quantityReceived + receipt.quantity },
         });
       }
 

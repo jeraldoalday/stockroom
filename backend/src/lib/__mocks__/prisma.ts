@@ -50,6 +50,46 @@ function matchesOperators(actual: unknown, operators: Rec): boolean {
   return true;
 }
 
+const KNOWN_UPDATE_OPERATORS = new Set(["increment", "decrement", "set"]);
+
+/**
+ * Resolves an update's `data` against the row it will be applied to.
+ *
+ * Real Prisma compiles `{ increment: n }` / `{ decrement: n }` into
+ * `"col" = "col" + n` at the database, so it reads and writes as one
+ * statement no matter how many callers race to update the same row. This
+ * mock has no such statement to fall back on — it can only apply the delta
+ * against whatever the row holds right now, in plain JS — so it does not
+ * reproduce that atomicity itself; what it does reproduce is the *shape* of
+ * the operation, so a caller written against the atomic form (see
+ * lib/inventory.ts's applyMovementDelta) exercises the same code path here
+ * that runs against real Postgres. An unrecognised operator throws rather
+ * than being written through literally, on the same principle as
+ * matchesOperators(): a query this mock doesn't understand should fail
+ * loudly, not silently corrupt the row it was meant to update.
+ */
+function resolveUpdateData(row: Rec, data: Rec): Rec {
+  const resolved: Rec = {};
+  for (const [field, value] of Object.entries(data)) {
+    if (value && typeof value === "object" && !(value instanceof Date) && !Array.isArray(value)) {
+      const operators = Object.keys(value);
+      for (const operator of operators) {
+        if (!KNOWN_UPDATE_OPERATORS.has(operator)) {
+          throw new Error(
+            `Prisma mock: unsupported update operator "${operator}" on "${field}". Add it to resolveUpdateData() rather than leaving the write untested.`
+          );
+        }
+      }
+      if ("increment" in value) resolved[field] = (row[field] ?? 0) + (value as Rec).increment;
+      else if ("decrement" in value) resolved[field] = (row[field] ?? 0) - (value as Rec).decrement;
+      else resolved[field] = (value as Rec).set;
+      continue;
+    }
+    resolved[field] = value;
+  }
+  return resolved;
+}
+
 function matchesClause(record: Rec, clause: Rec): boolean {
   return Object.entries(clause).every(([key, expected]) => {
     if (key === "OR") {
@@ -243,7 +283,7 @@ class Table {
   update({ where, data }: { where: Rec; data: Rec }) {
     const row = this.rows.find((r) => matchesClause(r, where));
     if (!row) throw new Error("Record to update not found");
-    Object.assign(row, data, { updatedAt: new Date() });
+    Object.assign(row, resolveUpdateData(row, data), { updatedAt: new Date() });
     return Promise.resolve({ ...row });
   }
 
@@ -262,7 +302,7 @@ class Table {
 
   updateMany({ where = {}, data }: { where?: Rec; data: Rec }) {
     const matched = this.rows.filter((r) => matchesClause(r, where));
-    matched.forEach((row) => Object.assign(row, data, { updatedAt: new Date() }));
+    matched.forEach((row) => Object.assign(row, resolveUpdateData(row, data), { updatedAt: new Date() }));
     return Promise.resolve({ count: matched.length });
   }
 }

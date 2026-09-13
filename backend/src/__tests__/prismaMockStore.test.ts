@@ -215,3 +215,63 @@ describe("comparisons against a null column", () => {
     expect(found).toEqual([]);
   });
 });
+
+// applyMovementDelta (lib/inventory.ts) relies on the guard and the write
+// landing in a single updateMany() so a real Postgres can resolve the two
+// as one statement. These hold the mock to the same call shape.
+describe("update operators", () => {
+  it("increment adds to whatever the row currently holds", async () => {
+    const item = await prisma.inventoryItem.create({
+      data: { organizationId: "org1", productId: "p1", locationId: "l1", quantity: 10 },
+    });
+    const updated = await prisma.inventoryItem.update({
+      where: { id: item.id },
+      data: { quantity: { increment: 5 } },
+    });
+    expect(updated.quantity).toBe(15);
+  });
+
+  it("decrement subtracts from whatever the row currently holds", async () => {
+    const item = await prisma.inventoryItem.create({
+      data: { organizationId: "org1", productId: "p1", locationId: "l1", quantity: 10 },
+    });
+    const updated = await prisma.inventoryItem.update({
+      where: { id: item.id },
+      data: { quantity: { decrement: 4 } },
+    });
+    expect(updated.quantity).toBe(6);
+  });
+
+  it("updateMany's where is re-checked per row, not against a value read earlier", async () => {
+    await prisma.inventoryItem.create({
+      data: { organizationId: "org1", productId: "p1", locationId: "l1", quantity: 2 },
+    });
+    await prisma.inventoryItem.create({
+      data: { organizationId: "org1", productId: "p2", locationId: "l1", quantity: 20 },
+    });
+
+    // Only the second row has enough on hand for a delta of -5; the guard
+    // must exclude the first rather than incrementing both and leaving one
+    // negative.
+    const result = await prisma.inventoryItem.updateMany({
+      where: { locationId: "l1", quantity: { gte: 5 } },
+      data: { quantity: { increment: -5 } },
+    });
+    expect(result.count).toBe(1);
+
+    const rows = await prisma.inventoryItem.findMany({ where: { locationId: "l1" } });
+    expect(rows.map((r) => r.quantity).sort((a, b) => a - b)).toEqual([2, 15]);
+  });
+
+  it("rejects an update operator it does not understand rather than writing it through literally", async () => {
+    const item = await prisma.inventoryItem.create({
+      data: { organizationId: "org1", productId: "p1", locationId: "l1", quantity: 10 },
+    });
+    expect(() =>
+      prisma.inventoryItem.update({
+        where: { id: item.id },
+        data: { quantity: { multiply: 2 } as never },
+      })
+    ).toThrow(/unsupported update operator/);
+  });
+});

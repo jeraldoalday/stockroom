@@ -49,3 +49,37 @@ export async function applyMovementDelta(
   });
   return created.quantity;
 }
+
+// Sets InventoryItem.quantity to an absolute value rather than adjusting it
+// by a delta. A stocktake is the one caller that needs this: completing one
+// means making on-hand equal exactly what was physically counted, not
+// applying some computed adjustment that only lands correctly if nothing
+// else has touched the same row since it was read. An increment computed
+// from an earlier read (`countedQty - onHandAtReadTime`) reopens the same
+// read-then-write gap `applyMovementDelta` above was fixed for, just one
+// level up: a concurrent movement against this exact product/location
+// between that read and the write would make the increment land on top of
+// a quantity it was never computed against. Writing the absolute figure
+// instead needs no such guard — there is no "not enough stock" case for a
+// count, so whatever the row holds when this statement runs, this is what
+// it is set to, unconditionally and atomically.
+export async function setInventoryQuantity(
+  tx: Prisma.TransactionClient,
+  params: { organizationId: string; productId: string; locationId: string; quantity: number }
+) {
+  const { organizationId, productId, locationId, quantity } = params;
+
+  const updated = await tx.inventoryItem.updateMany({
+    where: { productId, locationId },
+    data: { quantity },
+  });
+  if (updated.count > 0) return quantity;
+
+  // No row yet for this product/location — a stocktake can still be the
+  // first thing to ever record stock there (an "all-products" sheet counts
+  // products the ledger has never touched at this location).
+  const created = await tx.inventoryItem.create({
+    data: { organizationId, productId, locationId, quantity },
+  });
+  return created.quantity;
+}

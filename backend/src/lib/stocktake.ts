@@ -1,7 +1,7 @@
 import type { Prisma, StocktakeLine } from "@prisma/client";
 import { prisma } from "./prisma";
 import { ApiError } from "./errors";
-import { applyMovementDelta } from "./inventory";
+import { setInventoryQuantity } from "./inventory";
 
 /**
  * What goes on the count sheet.
@@ -97,6 +97,20 @@ export interface StocktakeSummary {
  * Runs inside the caller's transaction so a half-applied count is
  * impossible: either every adjustment lands with the status change, or none
  * of them do.
+ *
+ * The write below sets on-hand to `line.countedQty` directly
+ * (`setInventoryQuantity`) rather than applying `appliedDelta` as an
+ * increment. `onHand` is read a moment before this, so an increment
+ * computed from it would land on top of whatever the row holds when the
+ * write actually runs — correct only if nothing else touched this exact
+ * product/location between the two, which a concurrent movement elsewhere
+ * in the app could violate. Writing the absolute count instead makes the
+ * end state right regardless: on-hand becomes exactly what was counted, not
+ * "what was counted, adjusted by a number that assumed nothing else
+ * happened." `appliedDelta` is still computed from that same read and used
+ * for the movement/summary — the number that explains the change is only
+ * as fresh as the read it came from, but the on-hand value itself no longer
+ * depends on that read being current.
  */
 export async function applyStocktake(
   tx: Prisma.TransactionClient,
@@ -144,11 +158,11 @@ export async function applyStocktake(
     if (appliedDelta > 0) summary.unitsFound += appliedDelta;
     else summary.unitsLost += -appliedDelta;
 
-    await applyMovementDelta(tx, {
+    await setInventoryQuantity(tx, {
       organizationId,
       productId: line.productId,
       locationId,
-      delta: appliedDelta,
+      quantity: line.countedQty,
     });
     await tx.stockMovement.create({
       data: {

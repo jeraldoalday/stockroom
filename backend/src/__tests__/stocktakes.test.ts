@@ -2,6 +2,7 @@ import request from "supertest";
 
 jest.mock("../lib/prisma");
 
+import { prisma } from "../lib/prisma";
 import { resetPrismaMock } from "./testUtils/prismaMock";
 import { inviteAndSetPassword } from "./testUtils/invite";
 import { createApp } from "../app";
@@ -372,6 +373,41 @@ describe("Stocktakes API", () => {
       // Applying the sheet variance instead would have taken the sale off
       // the shelf a second time and left 7.
       expect(res.body.summary.variances[0]).toMatchObject({ variance: -1, appliedDelta: 1 });
+      const inventory = await quantityAt(token, stockedProductId);
+      expect(inventory.body.items[0].quantity).toBe(9);
+    });
+
+    // Completion reads on-hand, then writes based on what it read — the
+    // exact read-then-write shape applyMovementDelta itself was fixed for
+    // (see inventory.ts). A concurrent movement landing between that read
+    // and the write would make an *increment* computed from the stale read
+    // land on top of a quantity it was never computed against. Real
+    // concurrent requests can't be reproduced against this in-memory mock
+    // (see rateLimit.test.ts's note on hitRateLimit), so the stale read is
+    // reproduced directly: fake the on-hand lookup into reporting a value
+    // lower than what the row actually holds, and confirm completion still
+    // sets on-hand to exactly what was counted rather than to the stale
+    // read plus a computed delta.
+    it("sets on-hand to exactly what was counted even when the on-hand read was stale", async () => {
+      const token = await signUpAndGetToken("owner@shop.test", "The Shop");
+      const { locationId, stockedProductId } = await setUp(token);
+      const sheet = await createStocktake(token, { locationId });
+      await countLine(token, sheet.body.id, sheet.body.lines[0].id, 9);
+
+      // True on-hand is 10 (from setUp), but the completion route's own
+      // read of it is faked to report 3 — as if a large concurrent receipt
+      // had landed between that read and the write.
+      jest.spyOn(prisma.inventoryItem, "findFirst").mockResolvedValueOnce({ quantity: 3 } as never);
+
+      const res = await request(app)
+        .post(`/api/stocktakes/${sheet.body.id}/complete`)
+        .set("Authorization", `Bearer ${token}`);
+
+      (prisma.inventoryItem.findFirst as jest.Mock).mockRestore();
+
+      expect(res.status).toBe(200);
+      // An increment computed from the stale read (9 - 3 = +6) applied to
+      // the true row (10) would have landed on 16, not 9.
       const inventory = await quantityAt(token, stockedProductId);
       expect(inventory.body.items[0].quantity).toBe(9);
     });

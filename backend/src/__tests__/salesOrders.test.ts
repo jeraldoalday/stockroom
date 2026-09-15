@@ -2,6 +2,7 @@ import request from "supertest";
 
 jest.mock("../lib/prisma");
 
+import { prisma } from "../lib/prisma";
 import { resetPrismaMock } from "./testUtils/prismaMock";
 import { createApp } from "../app";
 
@@ -134,6 +135,51 @@ describe("Sales orders API", () => {
       .post(`/api/sales-orders/${so.body.id}/fulfill`)
       .set("Authorization", `Bearer ${token}`);
     expect(second.status).toBe(400);
+  });
+
+  // The pre-transaction status check above reads its own snapshot of the
+  // order, so a second /fulfill request that read the order before a first
+  // one committed could pass that check on a stale "still DRAFT" status.
+  // Real concurrent requests can't be reproduced against this in-memory
+  // mock (see purchaseOrders.test.ts's identical note on the overreceive
+  // race), so the stale read is reproduced directly: fake the
+  // pre-transaction lookup into reporting the order as still DRAFT, as it
+  // would have looked before the first fulfill actually landed, and confirm
+  // the in-transaction updateMany guard still catches it against the real
+  // current row rather than trusting that stale snapshot.
+  it("cannot fulfill an order twice even when the pre-check read a stale snapshot", async () => {
+    const token = await signUpAndGetToken("owner4b@shop.test", "The Shop");
+    const { productId, locationId } = await setUp(token);
+    const so = await createDraftSo(token, locationId, productId, 2);
+
+    const firstFulfill = await request(app)
+      .post(`/api/sales-orders/${so.body.id}/fulfill`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(firstFulfill.status).toBe(200);
+
+    const staleSalesOrder = { ...firstFulfill.body, status: "DRAFT" };
+    delete staleSalesOrder.lines;
+    jest.spyOn(prisma.salesOrder, "findFirst").mockResolvedValueOnce(staleSalesOrder as never);
+
+    const secondFulfill = await request(app)
+      .post(`/api/sales-orders/${so.body.id}/fulfill`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(secondFulfill.status).toBe(400);
+
+    (prisma.salesOrder.findFirst as jest.Mock).mockRestore();
+
+    // Rejected, so nothing from the second request applied: still only the
+    // first fulfillment's single SALE movement and the stock it actually
+    // moved, not a second decrement on top of it.
+    const inventory = await request(app)
+      .get(`/api/inventory?locationId=${locationId}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(inventory.body.items[0].quantity).toBe(8);
+
+    const movements = await request(app)
+      .get(`/api/stock-movements?productId=${productId}&type=SALE`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(movements.body.total).toBe(1);
   });
 
   it("cancels a draft sales order", async () => {

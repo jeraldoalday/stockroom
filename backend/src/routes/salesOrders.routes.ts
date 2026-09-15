@@ -297,6 +297,27 @@ router.post(
     }
 
     await prisma.$transaction(async (tx) => {
+      // The status check above read its own snapshot of the order, so two
+      // concurrent /fulfill requests (a double-click, a retried request)
+      // could both pass it on the same still-DRAFT row, then both reach
+      // here and both decrement stock and post a SALE movement for the same
+      // order — applyMovementDelta's own atomicity only protects against
+      // over-selling past what's on the shelf, not against fulfilling the
+      // same order twice when there's enough stock to cover both attempts.
+      // Claim the order with an atomic updateMany guarded on it still being
+      // DRAFT, the same shape as the PO receive route's line-level guard
+      // (lib/inventory.ts's applyMovementDelta), so Postgres checks the row
+      // as it stands when this statement runs rather than as it stood when
+      // the request started. Runs before any inventory write so a losing
+      // request never touches stock.
+      const claimed = await tx.salesOrder.updateMany({
+        where: { id: salesOrder.id, status: "DRAFT" },
+        data: { status: "FULFILLED" },
+      });
+      if (claimed.count === 0) {
+        throw ApiError.badRequest("Only a draft sales order can be fulfilled");
+      }
+
       for (const line of lines) {
         await applyMovementDelta(tx, {
           organizationId,
@@ -322,7 +343,6 @@ router.post(
           },
         });
       }
-      await tx.salesOrder.update({ where: { id: salesOrder.id }, data: { status: "FULFILLED" } });
     });
 
     const result = await loadSalesOrderWithLines(organizationId, salesOrder.id);

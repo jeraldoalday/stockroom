@@ -430,18 +430,31 @@ router.post(
     }
 
     const summary = await prisma.$transaction(async (tx) => {
-      const applied = await applyStocktake(tx, {
+      // The assertOpen check above read its own snapshot of the sheet, so
+      // two concurrent /complete requests (a double-click, a retried
+      // request after a timeout) could both pass it on the same still-OPEN
+      // row, then both reach here and both post a full set of ADJUSTMENT
+      // movements for this sheet — applyStocktake's own atomicity only
+      // makes each line's on-hand write land correctly, not the sheet as a
+      // whole run twice. Claim it with an atomic updateMany guarded on it
+      // still being OPEN, run before any inventory write, the same shape as
+      // salesOrders.routes.ts's /fulfill claim, so a losing request never
+      // posts duplicate movements.
+      const claimed = await tx.stocktake.updateMany({
+        where: { id: stocktake.id, status: "OPEN" },
+        data: { status: "COMPLETED", completedById: actorId, completedAt: new Date() },
+      });
+      if (claimed.count === 0) {
+        throw ApiError.badRequest("Only an open stocktake can be completed");
+      }
+
+      return applyStocktake(tx, {
         organizationId,
         locationId: stocktake.locationId,
         stocktakeId: stocktake.id,
         actorId,
         lines,
       });
-      await tx.stocktake.update({
-        where: { id: stocktake.id },
-        data: { status: "COMPLETED", completedById: actorId, completedAt: new Date() },
-      });
-      return applied;
     });
 
     res.json({ ...(await loadStocktakeWithLines(organizationId, stocktake.id)), summary });

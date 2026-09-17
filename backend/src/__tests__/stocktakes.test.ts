@@ -440,6 +440,52 @@ describe("Stocktakes API", () => {
       expect(res.body.error).toMatch(/only an open stocktake/i);
     });
 
+    // The assertOpen check above reads its own snapshot of the sheet, so a
+    // second /complete request that read the sheet before a first one
+    // committed could pass that check on a stale "still OPEN" status. Real
+    // concurrent requests can't be reproduced against this in-memory mock
+    // (see salesOrders.test.ts's identical note on the double-fulfill
+    // race), so the stale read is reproduced directly: fake the
+    // pre-transaction lookup into reporting the sheet as still OPEN, as it
+    // would have looked before the first completion actually landed, and
+    // confirm the in-transaction updateMany guard still catches it against
+    // the real current row rather than trusting that stale snapshot.
+    it("cannot complete a stocktake twice even when the pre-check read a stale snapshot", async () => {
+      const token = await signUpAndGetToken("owner5@shop.test", "The Shop");
+      const { locationId, stockedProductId } = await setUp(token);
+      const sheet = await createStocktake(token, { locationId });
+      await countLine(token, sheet.body.id, sheet.body.lines[0].id, 7);
+
+      const firstComplete = await request(app)
+        .post(`/api/stocktakes/${sheet.body.id}/complete`)
+        .set("Authorization", `Bearer ${token}`);
+      expect(firstComplete.status).toBe(200);
+
+      const staleStocktake = { ...firstComplete.body, status: "OPEN" };
+      delete staleStocktake.lines;
+      delete staleStocktake.summary;
+      jest.spyOn(prisma.stocktake, "findFirst").mockResolvedValueOnce(staleStocktake as never);
+
+      const secondComplete = await request(app)
+        .post(`/api/stocktakes/${sheet.body.id}/complete`)
+        .set("Authorization", `Bearer ${token}`);
+      expect(secondComplete.status).toBe(400);
+      expect(secondComplete.body.error).toMatch(/only an open stocktake/i);
+
+      (prisma.stocktake.findFirst as jest.Mock).mockRestore();
+
+      // Rejected, so nothing from the second request applied: still only
+      // the first completion's single ADJUSTMENT movement and the on-hand
+      // it actually set, not a second one posted on top of it.
+      const inventory = await quantityAt(token, stockedProductId);
+      expect(inventory.body.items[0].quantity).toBe(7);
+
+      const movements = await request(app)
+        .get(`/api/stock-movements?productId=${stockedProductId}&type=ADJUSTMENT`)
+        .set("Authorization", `Bearer ${token}`);
+      expect(movements.body.total).toBe(1);
+    });
+
     it("refuses to count a line on a completed sheet", async () => {
       const token = await signUpAndGetToken("owner@shop.test", "The Shop");
       const { locationId } = await setUp(token);

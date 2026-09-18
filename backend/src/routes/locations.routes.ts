@@ -97,8 +97,15 @@ router.post(
     // The unique index covers archived rows too, so a clash has to name the
     // archived one — otherwise the user retypes the same name and gets the
     // same refusal with nothing on screen that explains it.
+    //
+    // Case-insensitive: the `@@unique([organizationId, name])` index is
+    // case-sensitive at the database, and every list/search filter on a
+    // name elsewhere already treats "Warehouse" and "warehouse" as the same
+    // thing, so a case-sensitive check here would let two locations in that
+    // differ only by case — indistinguishable in every picker that lists
+    // them by name.
     const existing = await prisma.location.findFirst({
-      where: { organizationId, name: body.name },
+      where: { organizationId, name: { equals: body.name, mode: "insensitive" } },
     });
     if (existing) {
       throw ApiError.conflict(
@@ -132,8 +139,11 @@ router.patch(
     }
 
     if (body.name && body.name !== location.name) {
+      // Same case-insensitive check as POST / above. `NOT: { id: location.id }`
+      // means renaming "Warehouse" to "warehouse" still passes: it collides
+      // with nothing but itself.
       const nameTaken = await prisma.location.findFirst({
-        where: { organizationId, name: body.name, NOT: { id: location.id } },
+        where: { organizationId, name: { equals: body.name, mode: "insensitive" }, NOT: { id: location.id } },
       });
       if (nameTaken) {
         throw ApiError.conflict("A location with this name already exists");

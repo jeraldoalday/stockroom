@@ -39,8 +39,14 @@ router.post(
     const body = createSchema.parse(req.body);
     const organizationId = req.auth!.organizationId;
 
+    // Case-insensitive: the `@@unique([organizationId, name])` index is
+    // case-sensitive at the database, and every list/search filter on a
+    // name elsewhere already treats "Beverages" and "beverages" as the same
+    // thing, so a case-sensitive check here would let two categories in
+    // that differ only by case — indistinguishable in every picker that
+    // lists them by name.
     const existing = await prisma.category.findFirst({
-      where: { organizationId, name: body.name },
+      where: { organizationId, name: { equals: body.name, mode: "insensitive" } },
     });
     if (existing) {
       throw ApiError.conflict("A category with this name already exists");
@@ -73,8 +79,11 @@ router.patch(
     // errorHandler.ts ("A record with this organizationId, name already
     // exists") instead of this route's own friendly message.
     if (body.name && body.name !== category.name) {
+      // Same case-insensitive check as POST / above. `NOT: { id: category.id }`
+      // means renaming "Beverages" to "beverages" still passes: it collides
+      // with nothing but itself.
       const nameTaken = await prisma.category.findFirst({
-        where: { organizationId, name: body.name, NOT: { id: category.id } },
+        where: { organizationId, name: { equals: body.name, mode: "insensitive" }, NOT: { id: category.id } },
       });
       if (nameTaken) {
         throw ApiError.conflict(

@@ -171,4 +171,36 @@ describe("Renaming a category", () => {
     expect(res.status).toBe(200);
     expect(res.body.name).toBe("Drinks");
   });
+
+  // Every list/search filter on a name elsewhere already runs case-
+  // insensitively; the duplicate-name guard here and on POST / used to
+  // compare case-sensitively, so "Beverages" and "beverages" could coexist
+  // as two categories indistinguishable in any picker that lists them.
+  it("rejects a create that differs from an existing category only by case", async () => {
+    const auth = await signUp();
+    await createCategory(auth, "Beverages");
+
+    const res = await request(app).post("/api/categories").set(auth).send({ name: "beverages" });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe("A category with this name already exists");
+  });
+
+  it("rejects a rename that differs from another category only by case", async () => {
+    const auth = await signUp();
+    await createCategory(auth, "Beverages");
+    const snacksId = await createCategory(auth, "Snacks");
+
+    const res = await request(app).patch(`/api/categories/${snacksId}`).set(auth).send({ name: "BEVERAGES" });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe("A category with this name already exists");
+  });
+
+  it("allows renaming a category to its own current name with different case", async () => {
+    const auth = await signUp();
+    const id = await createCategory(auth, "Beverages");
+
+    const res = await request(app).patch(`/api/categories/${id}`).set(auth).send({ name: "beverages" });
+    expect(res.status).toBe(200);
+    expect(res.body.name).toBe("beverages");
+  });
 });

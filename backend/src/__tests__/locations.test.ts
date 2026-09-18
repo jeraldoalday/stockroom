@@ -58,6 +58,52 @@ describe("Locations API", () => {
     expect(dup.status).toBe(409);
   });
 
+  // Every list/search filter on a name elsewhere already runs case-
+  // insensitively; the duplicate-name guard here and on the rename below
+  // used to compare case-sensitively, so "Main Location" and "main location"
+  // could coexist as two locations indistinguishable in any picker.
+  it("rejects a location name that differs from an existing one only by case", async () => {
+    const token = await signUpAndGetToken("owner3b@shop.test", "The Shop");
+
+    const dup = await request(app)
+      .post("/api/locations")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ name: "main location" });
+
+    expect(dup.status).toBe(409);
+  });
+
+  it("rejects a rename that differs from another location only by case", async () => {
+    const token = await signUpAndGetToken("owner3c@shop.test", "The Shop");
+    const warehouse = await request(app)
+      .post("/api/locations")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ name: "Warehouse" });
+
+    const renamed = await request(app)
+      .patch(`/api/locations/${warehouse.body.id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ name: "MAIN LOCATION" });
+
+    expect(renamed.status).toBe(409);
+  });
+
+  it("allows renaming a location to its own current name with different case", async () => {
+    const token = await signUpAndGetToken("owner3d@shop.test", "The Shop");
+    const list = await request(app)
+      .get("/api/locations")
+      .set("Authorization", `Bearer ${token}`);
+    const mainId = list.body[0].id;
+
+    const renamed = await request(app)
+      .patch(`/api/locations/${mainId}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ name: "main location" });
+
+    expect(renamed.status).toBe(200);
+    expect(renamed.body.name).toBe("main location");
+  });
+
   it("moves the default flag when a new location is created as default", async () => {
     const token = await signUpAndGetToken("owner4@shop.test", "The Shop");
 

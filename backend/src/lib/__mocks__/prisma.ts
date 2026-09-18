@@ -31,7 +31,13 @@ function matchesOperators(actual: unknown, operators: Rec): boolean {
         : haystack.includes(needle);
     if (!hit) return false;
   }
-  if ("equals" in operators && actual !== operators.equals) return false;
+  if ("equals" in operators) {
+    const same =
+      operators.mode === "insensitive"
+        ? String(actual ?? "").toLowerCase() === String(operators.equals ?? "").toLowerCase()
+        : actual === operators.equals;
+    if (!same) return false;
+  }
   if ("in" in operators && !(operators.in as unknown[]).includes(actual)) return false;
   if ("notIn" in operators && (operators.notIn as unknown[]).includes(actual)) return false;
   if ("not" in operators && actual === operators.not) return false;

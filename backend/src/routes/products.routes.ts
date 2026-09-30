@@ -198,15 +198,26 @@ router.post(
       let categoryId: string | undefined;
       const categoryName = record.category?.trim();
       if (categoryName) {
-        const cached = categoryCache.get(categoryName);
+        // Case-insensitive, same as categories.routes.ts's own create/rename
+        // checks — the `@@unique([organizationId, name])` index is
+        // case-sensitive at the database, so a plain-equals lookup here
+        // would happily create a second "produce" alongside an existing
+        // "Produce" the moment a CSV export happened to capitalize it
+        // differently, splitting one category into two that every picker
+        // then shows as duplicates. The cache key is lowercased too, so two
+        // rows spelling a brand-new category differently within the same
+        // import share one row instead of racing each other to create it.
+        const cacheKey = categoryName.toLowerCase();
+        const cached = categoryCache.get(cacheKey);
         if (cached) {
           categoryId = cached;
         } else {
           const category =
-            (await prisma.category.findFirst({ where: { organizationId, name: categoryName } })) ??
-            (await prisma.category.create({ data: { organizationId, name: categoryName } }));
+            (await prisma.category.findFirst({
+              where: { organizationId, name: { equals: categoryName, mode: "insensitive" } },
+            })) ?? (await prisma.category.create({ data: { organizationId, name: categoryName } }));
           categoryId = category.id;
-          categoryCache.set(categoryName, categoryId);
+          categoryCache.set(cacheKey, categoryId);
         }
       }
 

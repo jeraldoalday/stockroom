@@ -128,6 +128,39 @@ describe("POST /api/products/import", () => {
     expect(list.body.total).toBe(2);
   });
 
+  // Regression test: the category lookup used to be a plain case-sensitive
+  // equals, so importing a row whose category casing didn't match an
+  // existing category's exactly (a common CSV-export quirk) created a
+  // second, near-duplicate category instead of filing the product under the
+  // one that already exists — splitting one category into two that every
+  // picker then shows side by side.
+  it("matches an existing category case-insensitively instead of creating a duplicate", async () => {
+    const token = await signUpAndGetToken("owner-cat@shop.test", "Cat Shop");
+    await request(app).post("/api/categories").set("Authorization", `Bearer ${token}`).send({ name: "Produce" });
+
+    const csv = [
+      "sku,name,category",
+      "SKU-1,Banana,produce",
+      "SKU-2,Apple,PRODUCE",
+    ].join("\n");
+
+    const res = await request(app)
+      .post("/api/products/import")
+      .set("Authorization", `Bearer ${token}`)
+      .set("Content-Type", "text/csv")
+      .send(csv);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ created: 2, updated: 0, errors: [] });
+
+    const categories = await request(app).get("/api/categories").set("Authorization", `Bearer ${token}`);
+    expect(categories.body.filter((c: { name: string }) => c.name.toLowerCase() === "produce")).toHaveLength(1);
+
+    const list = await request(app).get("/api/products").set("Authorization", `Bearer ${token}`);
+    const categoryIds = new Set(list.body.items.map((p: { categoryId: string }) => p.categoryId));
+    expect(categoryIds.size).toBe(1);
+  });
+
   it("never lets one organization's import affect another's products (tenant isolation)", async () => {
     const tokenA = await signUpAndGetToken("ownerA@shop.test", "Shop A");
     const tokenB = await signUpAndGetToken("ownerB@shop.test", "Shop B");

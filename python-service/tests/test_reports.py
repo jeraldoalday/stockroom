@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, text
 
 from app.config import settings
 from app.db import get_db
@@ -501,3 +502,105 @@ def test_export_dead_stock_rejects_an_out_of_range_window():
         headers=HEADERS,
     )
     assert res.status_code == 422
+
+
+# --- Sales-order line fan-out ----------------------------------------------
+#
+# A sales order is allowed to carry two lines for the same product --
+# POST /sales-orders and POST /:id/lines never reject one, and there's no
+# unique constraint on (salesOrderId, productId) in schema.prisma. Fulfilling
+# posts one SALE movement per line (salesOrders.routes.ts), so one order can
+# leave two stock_movements rows that share the same (salesOrderId,
+# productId) pair.
+#
+# Both queries below fall back to "sales_order_lines" for a price when a
+# movement predates the unitPriceCents column, joined on exactly that pair
+# because that's all a movement itself records. Joining straight to the line
+# table turns each such movement into one row per matching line instead of
+# one, so every SUM() over the result silently multiplies -- a sale of 5 and
+# 3 units reports as 16 sold, not 8, with no error anywhere to catch it.
+#
+# Run for real against a real SQLAlchemy engine (SQLite) rather than
+# monkeypatched: the bug this guards against lived entirely in the SQL text,
+# which a monkeypatched fetch function can't exercise and a result-shape
+# assertion can't catch either, since the broken query still returns a
+# well-formed, just wrong, answer.
+
+
+def _engine_with_a_sales_order_with_two_lines_for_the_same_product():
+    engine = create_engine("sqlite:///:memory:")
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                'CREATE TABLE "stock_movements" (id TEXT, "organizationId" TEXT, '
+                '"salesOrderId" TEXT, "productId" TEXT, "locationId" TEXT, type TEXT, '
+                'quantity INTEGER, "unitPriceCents" INTEGER, reason TEXT, "createdAt" TEXT)'
+            )
+        )
+        conn.execute(
+            text(
+                'CREATE TABLE "sales_order_lines" (id TEXT, "salesOrderId" TEXT, '
+                '"productId" TEXT, "unitPriceCents" INTEGER)'
+            )
+        )
+        conn.execute(text('CREATE TABLE "products" (id TEXT, sku TEXT, name TEXT)'))
+        conn.execute(text('CREATE TABLE "locations" (id TEXT, name TEXT)'))
+
+        created_at = "2026-08-15T00:00:00+00:00"
+        # One order, one product, two lines (5 @ $10.00, 3 @ $12.00):
+        # fulfilling posts one SALE movement per line, each already carrying
+        # its own price -- the ordinary case on the current schema, not an
+        # edge case needing a missing-price fallback.
+        conn.execute(
+            text(
+                'INSERT INTO "stock_movements" VALUES '
+                "(:id, :org, :so, :p, :loc, :type, :qty, :price, :reason, :created)"
+            ),
+            [
+                dict(id="m1", org="org_1", so="so_1", p="p_1", loc="l_1", type="SALE",
+                     qty=-5, price=1000, reason=None, created=created_at),
+                dict(id="m2", org="org_1", so="so_1", p="p_1", loc="l_1", type="SALE",
+                     qty=-3, price=1200, reason=None, created=created_at),
+            ],
+        )
+        conn.execute(
+            text('INSERT INTO "sales_order_lines" VALUES (:id, :so, :p, :price)'),
+            [
+                dict(id="line_1", so="so_1", p="p_1", price=1000),
+                dict(id="line_2", so="so_1", p="p_1", price=1200),
+            ],
+        )
+        conn.execute(
+            text('INSERT INTO "products" VALUES (:id, :sku, :name)'),
+            [dict(id="p_1", sku="WIDGET-1", name="Widget")],
+        )
+        conn.execute(text('INSERT INTO "locations" VALUES (:id, :name)'), [dict(id="l_1", name="Main")])
+    return engine
+
+
+def test_trend_does_not_double_count_a_sales_order_with_two_lines_for_the_same_product():
+    from app.services.reports import fetch_sales_stock_trend
+
+    engine = _engine_with_a_sales_order_with_two_lines_for_the_same_product()
+    since = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    with engine.connect() as conn:
+        rows = fetch_sales_stock_trend(conn, "org_1", since)
+
+    assert len(rows) == 1
+    # 5 + 3 units sold, not 16 -- the fan-out this guards against counted
+    # each movement once per matching sales-order line.
+    assert int(rows[0]["units_sold"]) == 8
+    assert int(rows[0]["revenue_cents"]) == 5 * 1000 + 3 * 1200
+
+
+def test_movements_export_does_not_duplicate_a_row_for_a_sales_order_with_two_lines_for_the_same_product():
+    from app.services.export import fetch_movement_rows
+
+    engine = _engine_with_a_sales_order_with_two_lines_for_the_same_product()
+    since = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    with engine.connect() as conn:
+        rows = fetch_movement_rows(conn, "org_1", since)
+
+    # One row per movement, not one row per (movement x matching line).
+    assert len(rows) == 2
+    assert {row["quantity"] for row in rows} == {-5, -3}

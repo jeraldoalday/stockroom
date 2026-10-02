@@ -72,7 +72,17 @@ _MOVEMENTS_SQL = text(
     FROM "stock_movements" sm
     JOIN "products" p ON p."id" = sm."productId"
     JOIN "locations" l ON l."id" = sm."locationId"
-    LEFT JOIN "sales_order_lines" sol
+    -- Collapsed to one fallback price per (salesOrderId, productId) before
+    -- the join, same reason and same shape as the trend report's _TREND_SQL
+    -- above it in this module's sibling file: a sales order can carry two
+    -- lines for the same product, and joining straight to
+    -- "sales_order_lines" would otherwise turn one movement row into one row
+    -- per matching line in this export.
+    LEFT JOIN (
+        SELECT "salesOrderId", "productId", MAX("unitPriceCents") AS "unitPriceCents"
+        FROM "sales_order_lines"
+        GROUP BY "salesOrderId", "productId"
+    ) sol
         ON sol."salesOrderId" = sm."salesOrderId" AND sol."productId" = sm."productId"
     WHERE sm."organizationId" = :organization_id
       AND sm."createdAt" >= :since

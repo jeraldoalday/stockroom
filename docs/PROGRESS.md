@@ -3569,3 +3569,81 @@ after the final teardown.
   correction, and Zod's existing validation-failure shape (a 400 naming the
   offending field) is already the right way to tell a caller "this value is
   invalid," not just "this value is negative or fractional."
+
+## Day 38 (post-MVP) — 2026-10-02
+
+**Planned:** local `main` was already in sync with `origin/main` at session
+start. Day 37's "Next" list had nothing newly actionable, so this session
+opened with its own gap sweep and found a real, previously-unaddressed
+double-counting bug in the Python service's sales/stock trend report and
+movements CSV export.
+
+**Shipped — stop the sales-order-line join from fanning out a stock
+movement into more than one row:**
+
+A sales order has never been restricted to one line per product —
+`POST /sales-orders` and `POST /:id/lines` both accept a repeat `productId`,
+and there is no `@@unique([salesOrderId, productId])` on `SalesOrderLine` in
+`schema.prisma` to stop it. Fulfilling posts one `SALE` movement per line
+(`salesOrders.routes.ts`), so an order with two lines for the same product
+leaves two `stock_movements` rows that share one `(salesOrderId,
+productId)` pair.
+
+`_TREND_SQL` (`app/services/reports.py`) and `_MOVEMENTS_SQL`
+(`app/services/export.py`) both fall back to `sales_order_lines` for a
+movement's price when the movement predates the `unitPriceCents` column
+(Day 17), joined on exactly that pair because that's all a movement itself
+records. Joined straight to the line table, that pair is no longer unique
+once an order repeats a product: each such movement joins against every
+matching line, not one, and every `SUM()` downstream counts it that many
+times over. A real sale of 5 units plus 3 units reported as 16 units sold
+at double the revenue in the trend report, and the same order's movements
+export printed the same two rows twice each — from an order that fulfilled
+correctly and whose own inventory math (`applyMovementDelta`) was never
+wrong. Reproduced first against a minimal in-memory model before touching
+either query, to be sure of the root cause rather than the symptom.
+
+- Both queries now join against a subquery that collapses
+  `sales_order_lines` to one fallback price per `(salesOrderId,
+  productId)` pair (`GROUP BY` + `MAX("unitPriceCents")`) before the join
+  runs, so the join can no longer multiply a row no matter how many lines
+  an order repeats for one product. A no-op for the ordinary one-line-per-
+  product case, and it leaves the existing price precedence (the
+  movement's own price first, the line's second) untouched for the one
+  thing the fallback actually exists for: rows written before the column
+  did.
+- 2 new tests in `test_reports.py`, run against a real SQLAlchemy engine
+  (SQLite, not mocked) rather than the monkeypatched-function style the
+  rest of this file uses for the HTTP-layer tests — the bug lived entirely
+  in the SQL text, which a monkeypatched `fetch_*` function can't exercise
+  and a result-shape assertion can't catch either, since the broken query
+  still returned a well-formed, just wrong, answer. Confirmed both tests
+  fail against the pre-fix query (16 units/4 rows) before confirming they
+  pass against the fix (8 units/2 rows).
+
+**Verified:** python-service `pytest -q` (52/52, up from 50 — 2 new); no
+backend or frontend file touched this session, confirmed their suites
+unaffected — backend `npx tsc --noEmit`, `npm run lint`, full Jest suite
+(455/455, one pre-existing flake under concurrent load on a bcrypt-timing
+test, green on its own); frontend `npm run lint`, `tsc -b`, `npm test`
+(440/440), `npm run build`. All clean. No database or migration touched —
+the regression test builds its own throwaway SQLite schema in-process
+rather than needing Postgres.
+
+**Next:**
+
+1. Still open, low urgency and unchanged across many entries: frontend
+   error reporting (no external sink) and Staff per-location scoping (no
+   design partner) — neither newly actionable this session either.
+2. No other fresh gaps surfaced this session worth adding to the list.
+
+**Blockers/decisions carried forward:**
+
+- Did not add a `@@unique([salesOrderId, productId])` constraint to stop a
+  sales order from repeating a product in the first place. Two lines for
+  the same product is a legitimate edit (different price, added at
+  different times) that the UI already allows without complaint, and nothing
+  about *that* is wrong — only this one reporting join assumed it couldn't
+  happen. Constraining the schema would be a product decision bigger than
+  this fix; this session's scope was making the existing, intended
+  behaviour report correctly, not restricting it.

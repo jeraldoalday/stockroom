@@ -4,6 +4,7 @@ import type { InventoryListResponse } from "./types";
 export interface InventoryQuery {
   locationId?: string;
   productId?: string;
+  search?: string;
   page?: number;
   pageSize?: number;
 }

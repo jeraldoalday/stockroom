@@ -3,11 +3,13 @@ import { screen, waitFor, within } from "@testing-library/react";
 import { InventoryPage } from "./InventoryPage";
 import { MockApi, fail, ok } from "../test/mockApi";
 import { ownerUser, renderApp } from "../test/render";
+import { DEFAULT_DEBOUNCE_MS } from "../components/useDebouncedValue";
 import type { InventoryItem, Location } from "../api/types";
 
 // Read-only: no create/archive/edit anywhere on this page, so the suite is
-// just the location filter, the table, and pagination (a real envelope here,
-// unlike the bare array `GET /locations` itself returns).
+// just the search box, the location filter, the table, and pagination (a
+// real envelope here, unlike the bare array `GET /locations` itself
+// returns).
 
 function location(overrides: Partial<Location> & { id: string; name: string }): Location {
   return { address: null, isDefault: false, isActive: true, ...overrides } as Location;
@@ -94,6 +96,33 @@ describe("InventoryPage list", () => {
     api.on("GET", "/inventory", fail(500, "boom"));
     renderPage();
     expect(await screen.findByText("Failed to load inventory.")).toBeInTheDocument();
+    expect(screen.queryByText("No stock recorded yet. Record a movement to get started.")).not.toBeInTheDocument();
+  });
+});
+
+describe("InventoryPage search", () => {
+  it("searches once for a typed word, not once per keystroke", async () => {
+    api.on("GET", "/inventory", page([widget], 2), page([widget]));
+    const { user } = renderPage();
+    await screen.findByText("Widget");
+
+    await user.type(screen.getByPlaceholderText("Search by product name or SKU..."), "Widget");
+
+    await waitFor(
+      () => expect(api.requestsFor("GET", "/inventory")).toHaveLength(2),
+      { timeout: DEFAULT_DEBOUNCE_MS * 4 }
+    );
+    expect(api.requestsFor("GET", "/inventory")[1].params).toMatchObject({ search: "Widget", page: 1 });
+  });
+
+  it("shows a search-specific empty message, not the brand-new-org one", async () => {
+    api.on("GET", "/inventory", page([widget], 1), page([]));
+    const { user } = renderPage();
+    await screen.findByText("Widget");
+
+    await user.type(screen.getByPlaceholderText("Search by product name or SKU..."), "nope");
+
+    expect(await screen.findByText("No stock records match “nope”.")).toBeInTheDocument();
     expect(screen.queryByText("No stock recorded yet. Record a movement to get started.")).not.toBeInTheDocument();
   });
 });

@@ -14,6 +14,7 @@ router.use(requireAuth);
 const listQuerySchema = z.object({
   locationId: z.string().optional(),
   productId: z.string().optional(),
+  search: z.string().trim().min(1).max(200).optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(200).default(50),
 });
@@ -41,10 +42,30 @@ router.get(
       }
     }
 
+    // InventoryItem has no name/SKU of its own to search — only a
+    // productId — so a text search resolves to a set of product ids first,
+    // the same two-step shape the CSV import's category/location lookups
+    // already use, rather than a nested `product: { OR: [...] }` filter.
+    let matchingProductIds: string[] | undefined;
+    if (query.search) {
+      const matches = await prisma.product.findMany({
+        where: {
+          organizationId,
+          OR: [
+            { name: { contains: query.search, mode: "insensitive" as const } },
+            { sku: { contains: query.search, mode: "insensitive" as const } },
+          ],
+        },
+        select: { id: true },
+      });
+      matchingProductIds = matches.map((product) => product.id);
+    }
+
     const where = {
       organizationId,
       ...(query.locationId ? { locationId: query.locationId } : {}),
       ...(query.productId ? { productId: query.productId } : {}),
+      ...(matchingProductIds ? { productId: { in: matchingProductIds } } : {}),
     };
 
     const [items, total] = await Promise.all([

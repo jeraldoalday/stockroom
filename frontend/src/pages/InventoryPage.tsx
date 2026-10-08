@@ -4,17 +4,30 @@ import { AppShell } from "../components/AppShell";
 import { fetchInventory } from "../api/inventory";
 import { Pagination } from "../components/Pagination";
 import { fetchLocations } from "../api/locations";
+import { useDebouncedValue } from "../components/useDebouncedValue";
+import { emptyListMessage } from "../components/emptyListMessage";
 
 const PAGE_SIZE = 50;
 
 export function InventoryPage() {
   const [locationId, setLocationId] = useState("");
+  const [search, setSearch] = useState("");
+  // Same split as the other list pages: the box stays controlled by the raw
+  // value for instant typing, the query is keyed on the settled one so a
+  // typed word costs one request, not one per keystroke.
+  const debouncedSearch = useDebouncedValue(search);
   const [page, setPage] = useState(1);
 
   const locationsQuery = useQuery({ queryKey: ["locations", "active"], queryFn: () => fetchLocations("active") });
   const inventoryQuery = useQuery({
-    queryKey: ["inventory", locationId, page],
-    queryFn: () => fetchInventory({ page, pageSize: PAGE_SIZE, ...(locationId ? { locationId } : {}) }),
+    queryKey: ["inventory", locationId, debouncedSearch, page],
+    queryFn: () =>
+      fetchInventory({
+        page,
+        pageSize: PAGE_SIZE,
+        ...(locationId ? { locationId } : {}),
+        ...(debouncedSearch ? { search: debouncedSearch } : {}),
+      }),
     placeholderData: (previous) => previous,
   });
 
@@ -24,21 +37,32 @@ export function InventoryPage() {
         <h1 className="text-2xl font-semibold text-gray-900">Inventory</h1>
       </div>
 
-      <select
-        value={locationId}
-        onChange={(e) => {
-          setLocationId(e.target.value);
-          setPage(1);
-        }}
-        className="mb-4 w-full max-w-xs rounded-md border border-gray-300 px-3 py-2 text-sm"
-      >
-        <option value="">All locations</option>
-        {locationsQuery.data?.map((location) => (
-          <option key={location.id} value={location.id}>
-            {location.name}
-          </option>
-        ))}
-      </select>
+      <div className="mb-4 flex flex-wrap gap-3">
+        <input
+          placeholder="Search by product name or SKU..."
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(1);
+          }}
+          className="w-full max-w-sm rounded-md border border-gray-300 px-3 py-2 text-sm"
+        />
+        <select
+          value={locationId}
+          onChange={(e) => {
+            setLocationId(e.target.value);
+            setPage(1);
+          }}
+          className="w-full max-w-xs rounded-md border border-gray-300 px-3 py-2 text-sm"
+        >
+          <option value="">All locations</option>
+          {locationsQuery.data?.map((location) => (
+            <option key={location.id} value={location.id}>
+              {location.name}
+            </option>
+          ))}
+        </select>
+      </div>
 
       <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
         <table className="min-w-full divide-y divide-gray-200 text-sm">
@@ -65,7 +89,9 @@ export function InventoryPage() {
             {inventoryQuery.data?.items.length === 0 && (
               <tr>
                 <td colSpan={4} className="px-4 py-6 text-center text-gray-500">
-                  No stock recorded yet. Record a movement to get started.
+                  {debouncedSearch
+                    ? emptyListMessage({ noun: "stock records", search: debouncedSearch })
+                    : "No stock recorded yet. Record a movement to get started."}
                 </td>
               </tr>
             )}

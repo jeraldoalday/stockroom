@@ -124,6 +124,15 @@ describe("GET /api/reports/*", () => {
     expect(res.status).toBe(502);
   });
 
+  it("returns a 503, not a 502, when the reports service can't be reached at all", async () => {
+    const token = await signUpAndGetToken("owner4b@shop.test", "Shop 4b");
+    jest.spyOn(global, "fetch").mockRejectedValue(new TypeError("fetch failed"));
+
+    const res = await request(app).get("/api/reports/export/stock").set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(503);
+  });
+
   it("rejects an out-of-range days value", async () => {
     const token = await signUpAndGetToken("owner5@shop.test", "Shop 5");
     mockPythonServiceResponse("");

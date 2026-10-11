@@ -1,11 +1,21 @@
 import request from "supertest";
+import { Prisma } from "@prisma/client";
 
 jest.mock("../lib/prisma");
 
+import { prisma } from "../lib/prisma";
 import { resetPrismaMock } from "./testUtils/prismaMock";
 import { createApp } from "../app";
 
 const app = createApp();
+
+function uniqueConstraintError() {
+  return new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+    code: "P2002",
+    clientVersion: "5.19.1",
+    meta: { target: ["organizationId", "sku"] },
+  });
+}
 
 beforeEach(() => {
   resetPrismaMock();
@@ -183,5 +193,53 @@ describe("POST /api/products/import", () => {
       .set("Content-Type", "text/csv")
       .send("");
     expect(res.status).toBe(400);
+  });
+
+  // Regression test: a check-then-write race on the product SKU (another
+  // import running at the same time, or a plain create from the UI,
+  // creating the same SKU between this row's own findFirst and its create)
+  // used to throw a raw Prisma unique-constraint error out of the loop,
+  // which aborted the whole import — every row still queued behind the one
+  // that raced, not just that one — contradicting the route's stated
+  // premise that rows are processed independently.
+  it("records a concurrent-SKU conflict against its own row instead of aborting the whole import", async () => {
+    const token = await signUpAndGetToken("owner-race@shop.test", "Race Shop");
+    const createSpy = jest.spyOn(prisma.product, "create").mockRejectedValueOnce(uniqueConstraintError());
+
+    const csv = [
+      "sku,name",
+      "SKU-RACE,Raced Widget",
+      "SKU-2,Fine Widget",
+    ].join("\n");
+
+    const res = await request(app)
+      .post("/api/products/import")
+      .set("Authorization", `Bearer ${token}`)
+      .set("Content-Type", "text/csv")
+      .send(csv);
+
+    expect(res.status).toBe(200);
+    expect(res.body.created).toBe(1);
+    expect(res.body.errors).toEqual([{ row: 2, message: expect.stringContaining("concurrently") }]);
+
+    const list = await request(app).get("/api/products").set("Authorization", `Bearer ${token}`);
+    expect(list.body.items.map((p: { sku: string }) => p.sku)).toEqual(["SKU-2"]);
+
+    createSpy.mockRestore();
+  });
+
+  it("still lets an unrelated database error abort the import rather than silently swallowing it", async () => {
+    const token = await signUpAndGetToken("owner-err@shop.test", "Err Shop");
+    const createSpy = jest.spyOn(prisma.product, "create").mockRejectedValueOnce(new Error("connection reset"));
+
+    const res = await request(app)
+      .post("/api/products/import")
+      .set("Authorization", `Bearer ${token}`)
+      .set("Content-Type", "text/csv")
+      .send("sku,name\nSKU-1,Widget");
+
+    expect(res.status).toBe(500);
+
+    createSpy.mockRestore();
   });
 });

@@ -1,5 +1,6 @@
 import express, { Router } from "express";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { asyncHandler } from "../lib/asyncHandler";
 import { requireAuth } from "../middleware/auth";
@@ -195,62 +196,84 @@ router.post(
       const reorderQty = parseNonNegativeInt(record.reorderQty, "reorderQty", rowNumber, errors);
       if (errors.length > rowErrorsBefore) continue;
 
-      let categoryId: string | undefined;
-      const categoryName = record.category?.trim();
-      if (categoryName) {
-        // Case-insensitive, same as categories.routes.ts's own create/rename
-        // checks — the `@@unique([organizationId, name])` index is
-        // case-sensitive at the database, so a plain-equals lookup here
-        // would happily create a second "produce" alongside an existing
-        // "Produce" the moment a CSV export happened to capitalize it
-        // differently, splitting one category into two that every picker
-        // then shows as duplicates. The cache key is lowercased too, so two
-        // rows spelling a brand-new category differently within the same
-        // import share one row instead of racing each other to create it.
-        const cacheKey = categoryName.toLowerCase();
-        const cached = categoryCache.get(cacheKey);
-        if (cached) {
-          categoryId = cached;
-        } else {
-          const category =
-            (await prisma.category.findFirst({
-              where: { organizationId, name: { equals: categoryName, mode: "insensitive" } },
-            })) ?? (await prisma.category.create({ data: { organizationId, name: categoryName } }));
-          categoryId = category.id;
-          categoryCache.set(cacheKey, categoryId);
+      // Every check-then-write below (category lookup-or-create, product
+      // lookup-or-create/update) is racing whatever else is touching this
+      // org right now — another import running at the same time, or a
+      // plain create/rename from the UI — the same gap products.routes.ts's
+      // own POST / and categories.routes.ts's own POST / are exposed to.
+      // There, a race surfaces as a 409 for that one request; here, letting
+      // it throw would abort every row still queued behind this one, which
+      // contradicts this route's whole premise that rows are independent
+      // (see the comment above `router.post("/import"`). Catching the
+      // unique-constraint violation and recording it against this row only
+      // keeps that promise.
+      try {
+        let categoryId: string | undefined;
+        const categoryName = record.category?.trim();
+        if (categoryName) {
+          // Case-insensitive, same as categories.routes.ts's own create/rename
+          // checks — the `@@unique([organizationId, name])` index is
+          // case-sensitive at the database, so a plain-equals lookup here
+          // would happily create a second "produce" alongside an existing
+          // "Produce" the moment a CSV export happened to capitalize it
+          // differently, splitting one category into two that every picker
+          // then shows as duplicates. The cache key is lowercased too, so two
+          // rows spelling a brand-new category differently within the same
+          // import share one row instead of racing each other to create it.
+          const cacheKey = categoryName.toLowerCase();
+          const cached = categoryCache.get(cacheKey);
+          if (cached) {
+            categoryId = cached;
+          } else {
+            const category =
+              (await prisma.category.findFirst({
+                where: { organizationId, name: { equals: categoryName, mode: "insensitive" } },
+              })) ?? (await prisma.category.create({ data: { organizationId, name: categoryName } }));
+            categoryId = category.id;
+            categoryCache.set(cacheKey, categoryId);
+          }
         }
-      }
 
-      const existing = await prisma.product.findFirst({ where: { organizationId, sku } });
-      if (existing) {
-        await prisma.product.update({
-          where: { id: existing.id },
-          data: {
-            name,
-            ...(record.description ? { description: record.description } : {}),
-            ...(categoryId ? { categoryId } : {}),
-            ...(costCents !== undefined ? { costCents } : {}),
-            ...(priceCents !== undefined ? { priceCents } : {}),
-            ...(reorderPoint !== undefined ? { reorderPoint } : {}),
-            ...(reorderQty !== undefined ? { reorderQty } : {}),
-          },
-        });
-        updated += 1;
-      } else {
-        await prisma.product.create({
-          data: {
-            organizationId,
-            sku,
-            name,
-            description: record.description || undefined,
-            categoryId,
-            costCents: costCents ?? 0,
-            priceCents: priceCents ?? 0,
-            reorderPoint: reorderPoint ?? 0,
-            reorderQty: reorderQty ?? 0,
-          },
-        });
-        created += 1;
+        const existing = await prisma.product.findFirst({ where: { organizationId, sku } });
+        if (existing) {
+          await prisma.product.update({
+            where: { id: existing.id },
+            data: {
+              name,
+              ...(record.description ? { description: record.description } : {}),
+              ...(categoryId ? { categoryId } : {}),
+              ...(costCents !== undefined ? { costCents } : {}),
+              ...(priceCents !== undefined ? { priceCents } : {}),
+              ...(reorderPoint !== undefined ? { reorderPoint } : {}),
+              ...(reorderQty !== undefined ? { reorderQty } : {}),
+            },
+          });
+          updated += 1;
+        } else {
+          await prisma.product.create({
+            data: {
+              organizationId,
+              sku,
+              name,
+              description: record.description || undefined,
+              categoryId,
+              costCents: costCents ?? 0,
+              priceCents: priceCents ?? 0,
+              reorderPoint: reorderPoint ?? 0,
+              reorderQty: reorderQty ?? 0,
+            },
+          });
+          created += 1;
+        }
+      } catch (err) {
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+          errors.push({
+            row: rowNumber,
+            message: "This row conflicts with a category or SKU created concurrently elsewhere — re-import it",
+          });
+          continue;
+        }
+        throw err;
       }
     }
 

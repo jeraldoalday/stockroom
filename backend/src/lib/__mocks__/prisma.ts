@@ -1,7 +1,15 @@
 // Manual Jest mock for the Prisma client. Route tests run against this
 // in-memory store instead of a real Postgres instance so `npm test` needs
-// no external services; true integration coverage runs in CI against
-// docker-compose's Postgres (see backend/README section on testing).
+// no external services. There is no backend/README, and CI (.github/
+// workflows/) runs this same mocked suite rather than a separate one
+// against docker-compose's Postgres — real integration coverage against
+// Postgres is still the Day 1 "carried forward" gap in docs/PROGRESS.md,
+// not something already covered elsewhere. Because this mock has no
+// database to enforce them, it does not reproduce unique/foreign-key
+// constraint violations (Prisma's P2002/P2003) the way a real connection
+// would — a route that relies on one of those being thrown (rather than
+// checking with its own findFirst first) will behave differently here than
+// in production.
 
 let idCounter = 0;
 function nextId(prefix: string) {

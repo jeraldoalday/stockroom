@@ -255,6 +255,58 @@ describe("Sales orders API", () => {
     expect(res.status).toBe(400);
   });
 
+  it("returns 404 for a sales order that doesn't exist", async () => {
+    const token = await signUpAndGetToken("owner9@shop.test", "The Shop");
+
+    const res = await request(app)
+      .get("/api/sales-orders/does-not-exist")
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(404);
+  });
+
+  it("rejects a customerId from another organization, on create and on PATCH", async () => {
+    const tokenA = await signUpAndGetToken("owner10a@shop.test", "Shop A");
+    const tokenB = await signUpAndGetToken("owner10b@shop.test", "Shop B");
+    const { productId, locationId } = await setUp(tokenA);
+    const { customerId: customerIdB } = await setUp(tokenB);
+
+    const createRes = await createDraftSo(tokenA, locationId, productId, 1, customerIdB);
+    expect(createRes.status).toBe(400);
+
+    const so = await createDraftSo(tokenA, locationId, productId, 1);
+    const patchRes = await request(app)
+      .patch(`/api/sales-orders/${so.body.id}`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ customerId: customerIdB });
+    expect(patchRes.status).toBe(400);
+  });
+
+  it("returns 404 editing or removing a line that doesn't exist", async () => {
+    const token = await signUpAndGetToken("owner11@shop.test", "The Shop");
+    const { productId, locationId } = await setUp(token);
+    const so = await createDraftSo(token, locationId, productId, 1);
+
+    const edit = await request(app)
+      .patch(`/api/sales-orders/${so.body.id}/lines/does-not-exist`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ quantity: 2 });
+    expect(edit.status).toBe(404);
+
+    const remove = await request(app)
+      .delete(`/api/sales-orders/${so.body.id}/lines/does-not-exist`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(remove.status).toBe(404);
+  });
+
+  it("returns 404 cancelling a sales order that doesn't exist", async () => {
+    const token = await signUpAndGetToken("owner12@shop.test", "The Shop");
+
+    const res = await request(app)
+      .post("/api/sales-orders/does-not-exist/cancel")
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(404);
+  });
+
   it("blocks line edits once the sales order is no longer a draft", async () => {
     const token = await signUpAndGetToken("owner8@shop.test", "The Shop");
     const { productId, locationId } = await setUp(token);

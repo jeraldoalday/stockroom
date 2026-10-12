@@ -333,6 +333,78 @@ describe("Purchase orders API", () => {
     expect(res.status).toBe(400);
   });
 
+  it("returns 404 for a purchase order that doesn't exist", async () => {
+    const token = await signUpAndGetToken("owner11@shop.test", "The Shop");
+
+    const res = await request(app)
+      .get("/api/purchase-orders/does-not-exist")
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(404);
+  });
+
+  it("rejects a PATCH supplierId from another organization", async () => {
+    const tokenA = await signUpAndGetToken("owner12a@shop.test", "Shop A");
+    const tokenB = await signUpAndGetToken("owner12b@shop.test", "Shop B");
+    const { supplierId: supplierIdA, productId } = await setUp(tokenA);
+    const { supplierId: supplierIdB } = await setUp(tokenB);
+    const po = await createDraftPo(tokenA, supplierIdA, productId);
+
+    const res = await request(app)
+      .patch(`/api/purchase-orders/${po.body.id}`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ supplierId: supplierIdB });
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 404 editing or removing a line that doesn't exist", async () => {
+    const token = await signUpAndGetToken("owner13@shop.test", "The Shop");
+    const { supplierId, productId } = await setUp(token);
+    const po = await createDraftPo(token, supplierId, productId);
+
+    const edit = await request(app)
+      .patch(`/api/purchase-orders/${po.body.id}/lines/does-not-exist`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ quantityOrdered: 2 });
+    expect(edit.status).toBe(404);
+
+    const remove = await request(app)
+      .delete(`/api/purchase-orders/${po.body.id}/lines/does-not-exist`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(remove.status).toBe(404);
+  });
+
+  it("returns 404 ordering or cancelling a purchase order that doesn't exist", async () => {
+    const token = await signUpAndGetToken("owner14@shop.test", "The Shop");
+
+    const order = await request(app)
+      .post("/api/purchase-orders/does-not-exist/order")
+      .set("Authorization", `Bearer ${token}`);
+    expect(order.status).toBe(404);
+
+    const cancel = await request(app)
+      .post("/api/purchase-orders/does-not-exist/cancel")
+      .set("Authorization", `Bearer ${token}`);
+    expect(cancel.status).toBe(404);
+  });
+
+  it("rejects cancelling a purchase order that has already been received", async () => {
+    const token = await signUpAndGetToken("owner15@shop.test", "The Shop");
+    const { supplierId, productId, locationId } = await setUp(token);
+    const po = await createDraftPo(token, supplierId, productId, 5);
+    await request(app)
+      .post(`/api/purchase-orders/${po.body.id}/order`)
+      .set("Authorization", `Bearer ${token}`);
+    await request(app)
+      .post(`/api/purchase-orders/${po.body.id}/receive`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ locationId, lines: [{ lineId: po.body.lines[0].id, quantity: 5 }] });
+
+    const res = await request(app)
+      .post(`/api/purchase-orders/${po.body.id}/cancel`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(400);
+  });
+
   it("keeps line management Owner-only, like the rest of purchase-order management", async () => {
     const token = await signUpAndGetToken("owner10@shop.test", "The Shop");
     const { supplierId, productId } = await setUp(token);

@@ -74,6 +74,51 @@ describe("Products API", () => {
       .send({ sku: "SKU-DUP", name: "A Different Widget" });
 
     expect(second.status).toBe(409);
+    expect(second.body.error).toBe("A product with this SKU already exists");
+  });
+
+  it("names the archived product when a new product's SKU collides with one", async () => {
+    const token = await signUpAndGetToken("owner-archived-sku@shop.test", "Archived SKU Shop");
+
+    const created = await request(app)
+      .post("/api/products")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ sku: "SKU-ARCHIVED", name: "Retired Widget" });
+    await request(app)
+      .delete(`/api/products/${created.body.id}`)
+      .set("Authorization", `Bearer ${token}`);
+
+    const res = await request(app)
+      .post("/api/products")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ sku: "SKU-ARCHIVED", name: "New Widget" });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe("An archived product already uses this SKU — restore or rename it");
+  });
+
+  it("names the archived product when a rename's SKU collides with one", async () => {
+    const token = await signUpAndGetToken("owner-archived-rename@shop.test", "Archived Rename Shop");
+
+    const archived = await request(app)
+      .post("/api/products")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ sku: "SKU-OLD", name: "Retired Widget" });
+    await request(app)
+      .delete(`/api/products/${archived.body.id}`)
+      .set("Authorization", `Bearer ${token}`);
+    const other = await request(app)
+      .post("/api/products")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ sku: "SKU-OTHER", name: "Other Widget" });
+
+    const res = await request(app)
+      .patch(`/api/products/${other.body.id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ sku: "SKU-OLD" });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe("An archived product already uses this SKU — restore or rename it");
   });
 
   it("never returns another organization's products (tenant isolation)", async () => {

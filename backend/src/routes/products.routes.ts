@@ -110,11 +110,19 @@ router.post(
 
     await assertCategoryBelongsToOrg(body.categoryId, organizationId);
 
+    // The unique index covers archived products too (see the comment above
+    // POST /:id/restore), so a clash can name one nothing in the active
+    // catalogue shows — "already exists" alone would leave the caller
+    // searching a list that doesn't have it.
     const existing = await prisma.product.findFirst({
       where: { organizationId, sku: body.sku },
     });
     if (existing) {
-      throw ApiError.conflict("A product with this SKU already exists");
+      throw ApiError.conflict(
+        existing.isActive
+          ? "A product with this SKU already exists"
+          : "An archived product already uses this SKU — restore or rename it"
+      );
     }
 
     const product = await prisma.product.create({
@@ -299,11 +307,16 @@ router.patch(
     }
 
     if (body.sku && body.sku !== product.sku) {
+      // Same archived-aware message as POST / above.
       const skuTaken = await prisma.product.findFirst({
         where: { organizationId, sku: body.sku, NOT: { id: product.id } },
       });
       if (skuTaken) {
-        throw ApiError.conflict("A product with this SKU already exists");
+        throw ApiError.conflict(
+          skuTaken.isActive
+            ? "A product with this SKU already exists"
+            : "An archived product already uses this SKU — restore or rename it"
+        );
       }
     }
 

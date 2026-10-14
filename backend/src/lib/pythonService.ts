@@ -24,11 +24,20 @@ export async function callPythonService(
   const headers: Record<string, string> = { "x-internal-key": env.pythonServiceInternalKey };
   if (requestId) headers["x-request-id"] = requestId;
 
+  // AbortController covers the case `fetch`'s own rejection doesn't: a
+  // service that accepted the connection but never finishes responding
+  // (stuck on a slow query, deadlocked, etc.) otherwise hangs this request
+  // — and the client's — for as long as the client is willing to wait.
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), env.pythonServiceTimeoutMs);
+
   let response: Response;
   try {
-    response = await fetch(url, { headers });
+    response = await fetch(url, { headers, signal: controller.signal });
   } catch {
     throw new ApiError(503, "Reports service is unavailable");
+  } finally {
+    clearTimeout(timeout);
   }
 
   const body = await response.text();

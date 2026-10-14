@@ -25,6 +25,10 @@ export const env = {
   // only to this API); these let the reports routes proxy to it internally.
   pythonServiceUrl: process.env.PYTHON_SERVICE_URL ?? "http://localhost:8000",
   pythonServiceInternalKey: process.env.PYTHON_SERVICE_INTERNAL_KEY ?? "dev-internal-key",
+  // A hung Python service (not merely an unreachable one — ECONNREFUSED
+  // already rejects the fetch promise on its own) would otherwise hold the
+  // Node request, and the client's own connection, open indefinitely.
+  pythonServiceTimeoutMs: Number(process.env.PYTHON_SERVICE_TIMEOUT_MS ?? 10_000),
   smtp: buildSmtpConfig(),
 };
 

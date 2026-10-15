@@ -4,6 +4,7 @@ jest.mock("../lib/prisma");
 
 import { resetPrismaMock } from "./testUtils/prismaMock";
 import { createApp } from "../app";
+import { emailSender } from "../lib/email";
 import { formatLowStockDigestEmail, sendLowStockDigest } from "../lib/lowStockDigest";
 
 const app = createApp();
@@ -53,7 +54,7 @@ describe("sendLowStockDigest", () => {
 
     const result = await sendLowStockDigest();
 
-    expect(result).toEqual({ organizationsChecked: 1, organizationsNotified: 0, emailsSent: 0 });
+    expect(result).toEqual({ organizationsChecked: 1, organizationsNotified: 0, emailsSent: 0, emailsFailed: 0 });
   });
 
   it("emails the Owner once a product is at or below its reorder point", async () => {
@@ -64,7 +65,7 @@ describe("sendLowStockDigest", () => {
 
     const result = await sendLowStockDigest();
 
-    expect(result).toEqual({ organizationsChecked: 1, organizationsNotified: 1, emailsSent: 1 });
+    expect(result).toEqual({ organizationsChecked: 1, organizationsNotified: 1, emailsSent: 1, emailsFailed: 0 });
     const logged = consoleLog.mock.calls.flat().join("\n");
     expect(logged).toContain("to=owner@shop.test");
     expect(logged).toContain("1 item is low on stock");
@@ -155,8 +156,53 @@ describe("sendLowStockDigest", () => {
 
     const result = await sendLowStockDigest();
 
-    expect(result).toEqual({ organizationsChecked: 1, organizationsNotified: 0, emailsSent: 0 });
+    expect(result).toEqual({ organizationsChecked: 1, organizationsNotified: 0, emailsSent: 0, emailsFailed: 0 });
     consoleLog.mockRestore();
+  });
+
+  it("keeps sending to the rest of an organization's Owners, and later organizations, after one send fails", async () => {
+    const consoleLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
+    const consoleError = jest.spyOn(console, "error").mockImplementation(() => undefined);
+    const first = await signUp("owner@shop.test", "The Shop");
+    await inviteStaff(first.accessToken, "second-owner@shop.test");
+    const users = await request(app).get("/api/users").set("Authorization", `Bearer ${first.accessToken}`);
+    const invited = users.body.items.find((u: { email: string }) => u.email === "second-owner@shop.test");
+    await request(app)
+      .patch(`/api/users/${invited.id}`)
+      .set("Authorization", `Bearer ${first.accessToken}`)
+      .send({ role: "OWNER" });
+    const firstProductId = await createProduct(first.accessToken, "SKU-1", 10);
+    await receiveStock(first.accessToken, firstProductId, 1);
+
+    const second = await signUp("owner@other-shop.test", "Other Shop");
+    const secondProductId = await createProduct(second.accessToken, "SKU-2", 10);
+    await receiveStock(second.accessToken, secondProductId, 1);
+    consoleLog.mockClear();
+
+    const sendSpy = jest
+      .spyOn(emailSender, "send")
+      .mockImplementationOnce(() => Promise.reject(new Error("mailbox unavailable")))
+      .mockImplementation(() => Promise.resolve());
+
+    const result = await sendLowStockDigest();
+
+    expect(result).toEqual({
+      organizationsChecked: 2,
+      organizationsNotified: 2,
+      emailsSent: 2,
+      emailsFailed: 1,
+    });
+    // The failing address (owner@shop.test, mocked first) didn't stop its
+    // own org's second Owner or the next organization from being emailed.
+    expect(sendSpy).toHaveBeenCalledTimes(3);
+    expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({ to: "second-owner@shop.test" }));
+    expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({ to: "owner@other-shop.test" }));
+    const logged = consoleError.mock.calls.flat().join("\n");
+    expect(logged).toContain("mailbox unavailable");
+    expect(logged).toContain("owner@shop.test");
+    sendSpy.mockRestore();
+    consoleLog.mockRestore();
+    consoleError.mockRestore();
   });
 
   it("only notifies the organizations that actually have low stock", async () => {
@@ -172,7 +218,7 @@ describe("sendLowStockDigest", () => {
 
     const result = await sendLowStockDigest();
 
-    expect(result).toEqual({ organizationsChecked: 2, organizationsNotified: 1, emailsSent: 1 });
+    expect(result).toEqual({ organizationsChecked: 2, organizationsNotified: 1, emailsSent: 1, emailsFailed: 0 });
     const logged = consoleLog.mock.calls.flat().join("\n");
     expect(logged).toContain("to=low-owner@shop.test");
     expect(logged).not.toContain("to=healthy-owner@shop.test");

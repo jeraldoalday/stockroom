@@ -2,6 +2,7 @@ import { prisma } from "./prisma";
 import { fetchLowStockPage, type LowStockRow } from "./dashboardStats";
 import { emailSender } from "./email";
 import { env } from "./env";
+import { logger } from "./logger";
 
 // Large enough to include every product any realistic customer (PRD §2:
 // 1-5 staff, 1-3 locations) could have below its reorder point at once.
@@ -15,6 +16,7 @@ export interface LowStockDigestResult {
   organizationsChecked: number;
   organizationsNotified: number;
   emailsSent: number;
+  emailsFailed: number;
 }
 
 export function formatLowStockDigestEmail(
@@ -55,12 +57,21 @@ export function formatLowStockDigestEmail(
  * Sends nothing, silently, for an organization with no subscribed Owners —
  * whether because it has none at all, or every Owner has opted out. Neither
  * case is something a digest job should raise an alarm about.
+ *
+ * One Owner's email failing to send (a bounced/invalid address, a
+ * transient SMTP timeout) is logged and skipped rather than thrown: this
+ * runs once a day over every organization in the system, and letting one
+ * bad address abort the loop would silently cost every organization after
+ * it in iteration order their digest for the day, for a problem that has
+ * nothing to do with them. `emailsFailed` on the result is how that still
+ * surfaces instead of disappearing.
  */
 export async function sendLowStockDigest(): Promise<LowStockDigestResult> {
   const organizations = await prisma.organization.findMany({ select: { id: true, name: true } });
 
   let organizationsNotified = 0;
   let emailsSent = 0;
+  let emailsFailed = 0;
 
   for (const organization of organizations) {
     const { items } = await fetchLowStockPage(organization.id, 1, DIGEST_MAX_ITEMS);
@@ -74,11 +85,20 @@ export async function sendLowStockDigest(): Promise<LowStockDigestResult> {
 
     const { subject, text } = formatLowStockDigestEmail(organization.name, items, `${env.corsOrigin}/dashboard`);
     for (const owner of owners) {
-      await emailSender.send({ to: owner.email, subject, text });
-      emailsSent += 1;
+      try {
+        await emailSender.send({ to: owner.email, subject, text });
+        emailsSent += 1;
+      } catch (error) {
+        emailsFailed += 1;
+        logger.error("low-stock digest email failed", {
+          organizationId: organization.id,
+          to: owner.email,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
     organizationsNotified += 1;
   }
 
-  return { organizationsChecked: organizations.length, organizationsNotified, emailsSent };
+  return { organizationsChecked: organizations.length, organizationsNotified, emailsSent, emailsFailed };
 }

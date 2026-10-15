@@ -11,8 +11,14 @@ async function main() {
   const result = await sendLowStockDigest();
   console.log(
     `Low-stock digest: checked ${result.organizationsChecked} organization(s), ` +
-      `notified ${result.organizationsNotified} with ${result.emailsSent} email(s) sent`
+      `notified ${result.organizationsNotified} with ${result.emailsSent} email(s) sent` +
+      (result.emailsFailed > 0 ? `, ${result.emailsFailed} failed` : "")
   );
+  // A failed send or two shouldn't mask as full success to the cron
+  // wrapper watching this job's exit code.
+  if (result.emailsFailed > 0) {
+    process.exitCode = 1;
+  }
 }
 
 main()

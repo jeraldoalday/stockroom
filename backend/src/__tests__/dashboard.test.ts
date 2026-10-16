@@ -169,6 +169,132 @@ describe("Dashboard API", () => {
     ]);
   });
 
+  describe("GET /api/dashboard/top-movers", () => {
+    async function sell(
+      auth: Record<string, string>,
+      locationId: string,
+      productId: string,
+      quantity: number
+    ) {
+      await request(app)
+        .post("/api/stock-movements")
+        .set(auth)
+        .send({ productId, locationId, type: "RECEIVE", quantity });
+      await request(app)
+        .post("/api/stock-movements")
+        .set(auth)
+        .send({ productId, locationId, type: "SALE", quantity });
+    }
+
+    it("ranks products by units sold, highest first", async () => {
+      const token = await signUpAndGetToken("owner6@shop.test", "The Shop");
+      const auth = { Authorization: `Bearer ${token}` };
+
+      const best = await request(app)
+        .post("/api/products")
+        .set(auth)
+        .send({ sku: "BEST-1", name: "Best Seller", priceCents: 500 });
+      const worst = await request(app)
+        .post("/api/products")
+        .set(auth)
+        .send({ sku: "SLOW-1", name: "Slow Mover", priceCents: 200 });
+      const locations = await request(app).get("/api/locations").set(auth);
+      const locationId = locations.body[0].id;
+
+      await sell(auth, locationId, best.body.id, 10);
+      await sell(auth, locationId, worst.body.id, 2);
+
+      const res = await request(app).get("/api/dashboard/top-movers").set(auth);
+      expect(res.status).toBe(200);
+      expect(res.body.items.map((i: { sku: string }) => i.sku)).toEqual(["BEST-1", "SLOW-1"]);
+      expect(res.body.items[0].unitsSold).toBe(10);
+      expect(res.body.items[0].estimatedValueCents).toBe(10 * 500);
+    });
+
+    it("breaks a tie in units sold by product name", async () => {
+      const token = await signUpAndGetToken("owner7@shop.test", "The Shop");
+      const auth = { Authorization: `Bearer ${token}` };
+
+      const zebra = await request(app)
+        .post("/api/products")
+        .set(auth)
+        .send({ sku: "Z-1", name: "Zebra Widget", priceCents: 100 });
+      const anvil = await request(app)
+        .post("/api/products")
+        .set(auth)
+        .send({ sku: "A-1", name: "Anvil Widget", priceCents: 100 });
+      const locations = await request(app).get("/api/locations").set(auth);
+      const locationId = locations.body[0].id;
+
+      await sell(auth, locationId, zebra.body.id, 5);
+      await sell(auth, locationId, anvil.body.id, 5);
+
+      const res = await request(app).get("/api/dashboard/top-movers").set(auth);
+      expect(res.body.items.map((i: { name: string }) => i.name)).toEqual([
+        "Anvil Widget",
+        "Zebra Widget",
+      ]);
+    });
+
+    it("respects the limit parameter", async () => {
+      const token = await signUpAndGetToken("owner8@shop.test", "The Shop");
+      const auth = { Authorization: `Bearer ${token}` };
+      const locations = await request(app).get("/api/locations").set(auth);
+      const locationId = locations.body[0].id;
+
+      for (const [sku, qty] of [
+        ["P-1", 9],
+        ["P-2", 7],
+        ["P-3", 5],
+      ] as [string, number][]) {
+        const product = await request(app)
+          .post("/api/products")
+          .set(auth)
+          .send({ sku, name: sku, priceCents: 100 });
+        await sell(auth, locationId, product.body.id, qty);
+      }
+
+      const res = await request(app).get("/api/dashboard/top-movers?limit=2").set(auth);
+      expect(res.body.items).toHaveLength(2);
+      expect(res.body.items.map((i: { sku: string }) => i.sku)).toEqual(["P-1", "P-2"]);
+    });
+
+    it("includes a product that sold well and was discontinued since", async () => {
+      const token = await signUpAndGetToken("owner9@shop.test", "The Shop");
+      const auth = { Authorization: `Bearer ${token}` };
+
+      const product = await request(app)
+        .post("/api/products")
+        .set(auth)
+        .send({ sku: "GONE-1", name: "Discontinued Widget", priceCents: 100 });
+      const locations = await request(app).get("/api/locations").set(auth);
+      await sell(auth, locations.body[0].id, product.body.id, 3);
+      await request(app).delete(`/api/products/${product.body.id}`).set(auth);
+
+      const res = await request(app).get("/api/dashboard/top-movers").set(auth);
+      expect(res.body.items[0].sku).toBe("GONE-1");
+      expect(res.body.items[0].isActive).toBe(false);
+    });
+
+    it("never mixes sales across organizations", async () => {
+      const tokenA = await signUpAndGetToken("ownerAtm@shop.test", "Shop A");
+      const tokenB = await signUpAndGetToken("ownerBtm@shop.test", "Shop B");
+      const authA = { Authorization: `Bearer ${tokenA}` };
+
+      const product = await request(app)
+        .post("/api/products")
+        .set(authA)
+        .send({ sku: "A-TM-1", name: "Shop A Widget", priceCents: 100 });
+      const locationsA = await request(app).get("/api/locations").set(authA);
+      await sell(authA, locationsA.body[0].id, product.body.id, 4);
+
+      const res = await request(app)
+        .get("/api/dashboard/top-movers")
+        .set("Authorization", `Bearer ${tokenB}`);
+      expect(res.body.items).toEqual([]);
+    });
+  });
+
   it("never mixes stock across organizations", async () => {
     const tokenA = await signUpAndGetToken("ownerA@shop.test", "Shop A");
     const tokenB = await signUpAndGetToken("ownerB@shop.test", "Shop B");

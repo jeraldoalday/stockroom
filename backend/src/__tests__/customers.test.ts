@@ -63,6 +63,38 @@ describe("Customers API", () => {
     expect(search.body.items[0].name).toBe("Jane Regular");
   });
 
+  it("updates a customer", async () => {
+    const token = await signUpAndGetToken("owner2b@shop.test", "The Shop");
+
+    const create = await request(app)
+      .post("/api/customers")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ name: "Jane Regular" });
+
+    const patch = await request(app)
+      .patch(`/api/customers/${create.body.id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ phone: "555-9999" });
+    expect(patch.status).toBe(200);
+    expect(patch.body.phone).toBe("555-9999");
+  });
+
+  it("404s updating a customer in another organization", async () => {
+    const tokenA = await signUpAndGetToken("ownerA2@shop.test", "Shop A");
+    const tokenB = await signUpAndGetToken("ownerB2@shop.test", "Shop B");
+
+    const created = await request(app)
+      .post("/api/customers")
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ name: "Shop A Customer" });
+
+    const res = await request(app)
+      .patch(`/api/customers/${created.body.id}`)
+      .set("Authorization", `Bearer ${tokenB}`)
+      .send({ phone: "555-0000" });
+    expect(res.status).toBe(404);
+  });
+
   it("deletes a customer with no order history", async () => {
     const token = await signUpAndGetToken("owner3@shop.test", "The Shop");
 

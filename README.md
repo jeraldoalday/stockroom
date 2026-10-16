@@ -9,6 +9,8 @@ tracking, purchase & sales orders, low-stock alerts, and reporting.
 - [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — running it somewhere real, and
   what isn't production-ready yet
 
+> **How this project is built:** I develop this platform with AI coding agents. I decide what the stock, ordering, and low-stock rules should be, review each change and its tests, and merge what holds up.
+
 ## Stack
 
 - **backend/** — Node.js + TypeScript + Express + Prisma + PostgreSQL (core API, auth, tenant boundary)

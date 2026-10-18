@@ -280,6 +280,65 @@ describe("CustomersPage create", () => {
   });
 });
 
+describe("CustomersPage edit", () => {
+  it("opens pre-filled with the customer's current details", async () => {
+    api.on("GET", "/customers", page([acme]));
+    const { user } = renderPage();
+    await screen.findByText("Acme Cafe");
+
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+
+    expect(screen.getByLabelText("Name")).toHaveValue("Acme Cafe");
+    expect(screen.getByLabelText("Email")).toHaveValue("hi@acme.test");
+    expect(screen.getByLabelText("Phone")).toHaveValue("555-0100");
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeInTheDocument();
+  });
+
+  it("sends the edited fields with a PATCH and refreshes the list", async () => {
+    const renamed = customer({ id: "c1", name: "Acme Coffee", email: "hi@acme.test", phone: "555-0100" });
+    api.on("GET", "/customers", page([acme]), page([renamed]));
+    api.on("PATCH", "/customers/c1", ok(renamed));
+    const { user } = renderPage();
+    await screen.findByText("Acme Cafe");
+
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    const nameField = screen.getByLabelText("Name");
+    await user.clear(nameField);
+    await user.type(nameField, "Acme Coffee");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(api.requestsFor("PATCH", "/customers/c1")).toHaveLength(1));
+    expect(JSON.parse(api.requestsFor("PATCH", "/customers/c1")[0].data)).toEqual({
+      name: "Acme Coffee",
+      email: "hi@acme.test",
+      phone: "555-0100",
+    });
+    expect(await screen.findByText("Acme Coffee")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Name")).not.toBeInTheDocument();
+  });
+
+  it("keeps the form open with the server's message when the edit fails", async () => {
+    api.on("GET", "/customers", page([acme]));
+    api.on("PATCH", "/customers/c1", fail(409, "A customer with that name already exists"));
+    const { user } = renderPage();
+    await screen.findByText("Acme Cafe");
+
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByText("A customer with that name already exists")).toBeInTheDocument();
+    expect(screen.getByLabelText("Name")).toHaveValue("Acme Cafe");
+  });
+
+  it("does not offer Edit for an archived customer", async () => {
+    api.on("GET", "/customers", page([archived]));
+    renderPage();
+
+    const row = (await screen.findByText("Closed Deli")).closest("tr") as HTMLElement;
+    expect(within(row).queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+  });
+});
+
 describe("CustomersPage pagination", () => {
   it("hides the control while everything fits on one page", async () => {
     api.on("GET", "/customers", page([acme, bolt]));

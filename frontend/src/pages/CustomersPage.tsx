@@ -2,7 +2,7 @@ import { useId, useState } from "react";
 import type { FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
-import { archiveCustomer, createCustomer, fetchCustomers, restoreCustomer } from "../api/customers";
+import { archiveCustomer, createCustomer, fetchCustomers, restoreCustomer, updateCustomer } from "../api/customers";
 import { isApiError } from "../api/errors";
 import { emptyListMessage } from "../components/emptyListMessage";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -31,9 +31,12 @@ export function CustomersPage() {
   const debouncedSearch = useDebouncedValue(search);
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState<CustomerStatusFilter>("active");
-  const [showForm, setShowForm] = useState(false);
+  // null = form closed; a Customer = editing it; "new" = the create form.
+  const [formTarget, setFormTarget] = useState<Customer | "new" | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
+
+  const editing = formTarget !== null && formTarget !== "new" ? formTarget : null;
 
   const customersQuery = useQuery({
     queryKey: ["customers", debouncedSearch, status, page],
@@ -41,16 +44,29 @@ export function CustomersPage() {
     placeholderData: (previous) => previous,
   });
 
+  function onSaved() {
+    queryClient.invalidateQueries({ queryKey: ["customers"] });
+    setFormTarget(null);
+  }
+
   const createMutation = useMutation({
     mutationFn: createCustomer,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["customers"] });
-      setShowForm(false);
-    },
+    onSuccess: onSaved,
     onError: (err) => {
       setFormError(isApiError(err) ? err.response?.data?.error ?? "Could not create customer" : "Could not create customer");
     },
   });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, ...payload }: { id: string } & Parameters<typeof updateCustomer>[1]) =>
+      updateCustomer(id, payload),
+    onSuccess: onSaved,
+    onError: (err) => {
+      setFormError(isApiError(err) ? err.response?.data?.error ?? "Could not update customer" : "Could not update customer");
+    },
+  });
+
+  const saving = createMutation.isPending || updateMutation.isPending;
 
   const pendingArchive = useConfirmation<Customer>();
 
@@ -70,15 +86,21 @@ export function CustomersPage() {
     },
   });
 
-  function handleCreate(e: FormEvent<HTMLFormElement>) {
+  function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setFormError(null);
     const form = new FormData(e.currentTarget);
-    createMutation.mutate({
+    const payload = {
       name: String(form.get("name")),
       email: String(form.get("email") || "") || undefined,
       phone: String(form.get("phone") || "") || undefined,
-    });
+    };
+
+    if (editing) {
+      updateMutation.mutate({ id: editing.id, ...payload });
+    } else {
+      createMutation.mutate(payload);
+    }
   }
 
   return (
@@ -87,35 +109,64 @@ export function CustomersPage() {
         <h1 className="text-2xl font-semibold text-gray-900">Customers</h1>
         <button
           type="button"
-          onClick={() => setShowForm((v) => !v)}
+          onClick={() => {
+            setFormError(null);
+            setFormTarget((current) => (current === null ? "new" : null));
+          }}
           className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
         >
-          {showForm ? "Cancel" : "Add customer"}
+          {formTarget !== null ? "Cancel" : "Add customer"}
         </button>
       </div>
 
-      {showForm && (
-        <form onSubmit={handleCreate} className="mb-6 grid grid-cols-2 gap-4 rounded-lg border border-gray-200 bg-white p-4">
+      {formTarget !== null && (
+        <form
+          // Remounts the form when switching between create and editing a
+          // different customer, so the uncontrolled inputs pick up new defaults.
+          key={editing?.id ?? "new"}
+          onSubmit={handleSubmit}
+          className="mb-6 grid grid-cols-2 gap-4 rounded-lg border border-gray-200 bg-white p-4"
+        >
+          <div className="col-span-2 text-sm font-medium text-gray-900">
+            {editing ? `Edit ${editing.name}` : "New customer"}
+          </div>
           {formError && <div role="alert" className="col-span-2 text-sm text-red-600">{formError}</div>}
           <div>
             <label htmlFor={`${fieldId}-name`} className="block text-sm font-medium text-gray-700">Name</label>
-            <input id={`${fieldId}-name`} name="name" required className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+            <input
+              id={`${fieldId}-name`}
+              name="name"
+              required
+              defaultValue={editing?.name}
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+            />
           </div>
           <div>
             <label htmlFor={`${fieldId}-email`} className="block text-sm font-medium text-gray-700">Email</label>
-            <input id={`${fieldId}-email`} name="email" type="email" className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+            <input
+              id={`${fieldId}-email`}
+              name="email"
+              type="email"
+              defaultValue={editing?.email ?? ""}
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+            />
           </div>
           <div>
             <label htmlFor={`${fieldId}-phone`} className="block text-sm font-medium text-gray-700">Phone</label>
-            <input id={`${fieldId}-phone`} name="phone" className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+            <input
+              id={`${fieldId}-phone`}
+              name="phone"
+              defaultValue={editing?.phone ?? ""}
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+            />
           </div>
           <div className="col-span-2">
             <button
               type="submit"
-              disabled={createMutation.isPending}
+              disabled={saving}
               className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
             >
-              {createMutation.isPending ? "Saving..." : "Save customer"}
+              {saving ? "Saving..." : editing ? "Save changes" : "Save customer"}
             </button>
           </div>
         </form>
@@ -193,16 +244,28 @@ export function CustomersPage() {
                 <td className="px-4 py-2 text-gray-500">{customer.phone ?? "—"}</td>
                 <td className="px-4 py-2 text-right">
                   {customer.isActive ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setRowError(null);
-                        pendingArchive.request(customer);
-                      }}
-                      className="text-xs text-red-600 hover:underline"
-                    >
-                      Archive
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormError(null);
+                          setFormTarget(customer);
+                        }}
+                        className="text-xs text-brand-600 hover:underline"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRowError(null);
+                          pendingArchive.request(customer);
+                        }}
+                        className="ml-3 text-xs text-red-600 hover:underline"
+                      >
+                        Archive
+                      </button>
+                    </>
                   ) : (
                     <button
                       type="button"

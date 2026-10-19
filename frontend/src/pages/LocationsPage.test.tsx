@@ -285,3 +285,63 @@ describe("LocationsPage create", () => {
     expect(screen.getByLabelText("Name")).toHaveValue("Main Warehouse");
   });
 });
+
+describe("LocationsPage edit", () => {
+  it("opens pre-filled with the location's current details, with no default checkbox", async () => {
+    api.on("GET", "/locations", ok([warehouse]));
+    const { user } = renderPage();
+    await screen.findByText("Main Warehouse");
+
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+
+    expect(screen.getByLabelText("Name")).toHaveValue("Main Warehouse");
+    expect(screen.getByLabelText("Address")).toHaveValue("1 Dock Rd");
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Set as default location")).not.toBeInTheDocument();
+  });
+
+  it("sends only name and address with a PATCH, leaving isDefault untouched, and refreshes the list", async () => {
+    const renamed = location({ id: "l2", name: "Downtown Storefront" });
+    api.on("GET", "/locations", ok([storefront]), ok([renamed]));
+    api.on("PATCH", "/locations/l2", ok(renamed));
+    const { user } = renderPage();
+    await screen.findByText("Storefront");
+
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    const nameField = screen.getByLabelText("Name");
+    await user.clear(nameField);
+    await user.type(nameField, "Downtown Storefront");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(api.requestsFor("PATCH", "/locations/l2")).toHaveLength(1));
+    expect(JSON.parse(api.requestsFor("PATCH", "/locations/l2")[0].data)).toEqual({
+      name: "Downtown Storefront",
+    });
+    expect(await screen.findByText("Downtown Storefront")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Name")).not.toBeInTheDocument();
+  });
+
+  it("keeps the form open with the server's message when the edit fails", async () => {
+    api.on("GET", "/locations", ok([storefront]));
+    api.on("PATCH", "/locations/l2", fail(409, "A location with that name already exists"));
+    const { user } = renderPage();
+    await screen.findByText("Storefront");
+
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    const nameField = screen.getByLabelText("Name");
+    await user.clear(nameField);
+    await user.type(nameField, "Main Warehouse");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByText("A location with that name already exists")).toBeInTheDocument();
+    expect(screen.getByLabelText("Name")).toHaveValue("Main Warehouse");
+  });
+
+  it("does not offer Edit for an archived location", async () => {
+    api.on("GET", "/locations", ok([archived]));
+    renderPage();
+
+    const row = (await screen.findByText("Old Annex")).closest("tr") as HTMLElement;
+    expect(within(row).queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+  });
+});

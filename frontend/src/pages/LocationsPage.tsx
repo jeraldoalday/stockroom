@@ -32,9 +32,12 @@ export function LocationsPage() {
   const fieldId = useId();
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<LocationStatusFilter>("active");
-  const [showForm, setShowForm] = useState(false);
+  // null = form closed; a Location = editing it; "new" = the create form.
+  const [formTarget, setFormTarget] = useState<Location | "new" | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
+
+  const editing = formTarget !== null && formTarget !== "new" ? formTarget : null;
 
   const locationsQuery = useQuery({
     queryKey: ["locations", status],
@@ -43,14 +46,25 @@ export function LocationsPage() {
   });
   const pendingArchive = useConfirmation<Location>();
 
+  function onSaved() {
+    queryClient.invalidateQueries({ queryKey: ["locations"] });
+    setFormTarget(null);
+  }
+
   const createMutation = useMutation({
     mutationFn: createLocation,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["locations"] });
-      setShowForm(false);
-    },
+    onSuccess: onSaved,
     onError: (err) => setFormError(describeError(err, "Could not create location")),
   });
+
+  const renameMutation = useMutation({
+    mutationFn: ({ id, ...payload }: { id: string } & Parameters<typeof updateLocation>[1]) =>
+      updateLocation(id, payload),
+    onSuccess: onSaved,
+    onError: (err) => setFormError(describeError(err, "Could not update location")),
+  });
+
+  const saving = createMutation.isPending || renameMutation.isPending;
 
   const setDefaultMutation = useMutation({
     mutationFn: (id: string) => updateLocation(id, { isDefault: true }),
@@ -70,15 +84,24 @@ export function LocationsPage() {
     onError: (err) => setRowError(describeError(err, "Could not restore location")),
   });
 
-  function handleCreate(e: FormEvent<HTMLFormElement>) {
+  function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setFormError(null);
     const form = new FormData(e.currentTarget);
-    createMutation.mutate({
+    const payload = {
       name: String(form.get("name")),
       address: String(form.get("address") || "") || undefined,
-      isDefault: form.get("isDefault") === "on",
-    });
+    };
+
+    if (editing) {
+      // isDefault is deliberately left out of an edit: it's managed by the
+      // "Make default" action in the table, which only ever sends `true` —
+      // sending an explicit `false` here for the current default could
+      // clear it with nothing else proposed to take its place.
+      renameMutation.mutate({ id: editing.id, ...payload });
+    } else {
+      createMutation.mutate({ ...payload, isDefault: form.get("isDefault") === "on" });
+    }
   }
 
   return (
@@ -87,35 +110,60 @@ export function LocationsPage() {
         <h1 className="text-2xl font-semibold text-gray-900">Locations</h1>
         <button
           type="button"
-          onClick={() => setShowForm((v) => !v)}
+          onClick={() => {
+            setFormError(null);
+            setFormTarget((current) => (current === null ? "new" : null));
+          }}
           className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
         >
-          {showForm ? "Cancel" : "Add location"}
+          {formTarget !== null ? "Cancel" : "Add location"}
         </button>
       </div>
 
-      {showForm && (
-        <form onSubmit={handleCreate} className="mb-6 grid grid-cols-2 gap-4 rounded-lg border border-gray-200 bg-white p-4">
+      {formTarget !== null && (
+        <form
+          // Remounts the form when switching between create and editing a
+          // different location, so the uncontrolled inputs pick up new defaults.
+          key={editing?.id ?? "new"}
+          onSubmit={handleSubmit}
+          className="mb-6 grid grid-cols-2 gap-4 rounded-lg border border-gray-200 bg-white p-4"
+        >
+          <div className="col-span-2 text-sm font-medium text-gray-900">
+            {editing ? `Edit ${editing.name}` : "New location"}
+          </div>
           {formError && <div role="alert" className="col-span-2 text-sm text-red-600">{formError}</div>}
           <div>
             <label htmlFor={`${fieldId}-name`} className="block text-sm font-medium text-gray-700">Name</label>
-            <input id={`${fieldId}-name`} name="name" required className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+            <input
+              id={`${fieldId}-name`}
+              name="name"
+              required
+              defaultValue={editing?.name}
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+            />
           </div>
           <div>
             <label htmlFor={`${fieldId}-address`} className="block text-sm font-medium text-gray-700">Address</label>
-            <input id={`${fieldId}-address`} name="address" className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+            <input
+              id={`${fieldId}-address`}
+              name="address"
+              defaultValue={editing?.address ?? ""}
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+            />
           </div>
-          <div className="col-span-2 flex items-center gap-2">
-            <input id="isDefault" name="isDefault" type="checkbox" className="rounded border-gray-300" />
-            <label htmlFor="isDefault" className="text-sm text-gray-700">Set as default location</label>
-          </div>
+          {!editing && (
+            <div className="col-span-2 flex items-center gap-2">
+              <input id="isDefault" name="isDefault" type="checkbox" className="rounded border-gray-300" />
+              <label htmlFor="isDefault" className="text-sm text-gray-700">Set as default location</label>
+            </div>
+          )}
           <div className="col-span-2">
             <button
               type="submit"
-              disabled={createMutation.isPending}
+              disabled={saving}
               className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
             >
-              {createMutation.isPending ? "Saving..." : "Save location"}
+              {saving ? "Saving..." : editing ? "Save changes" : "Save location"}
             </button>
           </div>
         </form>
@@ -201,16 +249,28 @@ export function LocationsPage() {
                 </td>
                 <td className="px-4 py-2 text-right">
                   {location.isActive ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setRowError(null);
-                        pendingArchive.request(location);
-                      }}
-                      className="text-xs text-red-600 hover:underline"
-                    >
-                      Archive
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormError(null);
+                          setFormTarget(location);
+                        }}
+                        className="text-xs text-brand-600 hover:underline"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRowError(null);
+                          pendingArchive.request(location);
+                        }}
+                        className="ml-3 text-xs text-red-600 hover:underline"
+                      >
+                        Archive
+                      </button>
+                    </>
                   ) : (
                     <button
                       type="button"

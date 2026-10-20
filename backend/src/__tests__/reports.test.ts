@@ -55,6 +55,23 @@ describe("GET /api/reports/*", () => {
     expect((calledInit.headers as Record<string, string>)["x-internal-key"]).toBeTruthy();
   });
 
+  // The Python service names the download (`attachment; filename="..."`)
+  // so the browser saves it as something other than the request URL; that
+  // only reaches the client if the proxy forwards the header along with
+  // the body, which `sendProxied` does conditionally rather than always
+  // setting one.
+  it("forwards the reports service's Content-Disposition header on a CSV export", async () => {
+    const token = await signUpAndGetToken("owner10@shop.test", "Shop 10");
+    mockPythonServiceResponse("sku,name\nSKU-1,Widget\n", {
+      headers: { "content-type": "text/csv", "content-disposition": 'attachment; filename="products.csv"' },
+    });
+
+    const res = await request(app).get("/api/reports/export/products").set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.headers["content-disposition"]).toBe('attachment; filename="products.csv"');
+  });
+
   it("forwards the request id to the python service so both services' logs share one id", async () => {
     const token = await signUpAndGetToken("owner9@shop.test", "Shop 9");
     const fetchSpy = mockPythonServiceResponse("sku,name\nSKU-1,Widget\n");

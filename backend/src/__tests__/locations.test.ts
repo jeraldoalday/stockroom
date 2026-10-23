@@ -47,6 +47,31 @@ describe("Locations API", () => {
     expect(res.body.isDefault).toBe(false);
   });
 
+  it("updates a location's name and address", async () => {
+    const token = await signUpAndGetToken("owner2b@shop.test", "The Shop");
+
+    const created = await request(app)
+      .post("/api/locations")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ name: "Warehouse", address: "123 Dock St" });
+
+    const updated = await request(app)
+      .patch(`/api/locations/${created.body.id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ name: "North Warehouse", address: "456 Harbor Ave" });
+
+    expect(updated.status).toBe(200);
+    expect(updated.body.name).toBe("North Warehouse");
+    expect(updated.body.address).toBe("456 Harbor Ave");
+
+    const fetched = await request(app)
+      .get(`/api/locations/${created.body.id}`)
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(fetched.body.name).toBe("North Warehouse");
+    expect(fetched.body.address).toBe("456 Harbor Ave");
+  });
+
   it("rejects a duplicate location name within the same organization", async () => {
     const token = await signUpAndGetToken("owner3@shop.test", "The Shop");
 

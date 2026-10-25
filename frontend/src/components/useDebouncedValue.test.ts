@@ -80,6 +80,15 @@ describe("useDebouncedValue", () => {
     expect(result.current).toBe("widget");
   });
 
+  it("settles immediately when the box is cleared", () => {
+    const { result, rerender } = renderHook(({ v }) => useDebouncedValue(v), {
+      initialProps: { v: "North" },
+    });
+
+    rerender({ v: "" });
+    expect(result.current).toBe("");
+  });
+
   it("works for values other than strings", () => {
     const { result, rerender } = renderHook(({ v }) => useDebouncedValue(v), {
       initialProps: { v: 1 },

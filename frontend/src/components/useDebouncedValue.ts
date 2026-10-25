@@ -17,10 +17,15 @@ export function useDebouncedValue<T>(value: T, delayMs: number = DEFAULT_DEBOUNC
   const [settled, setSettled] = useState(value);
 
   useEffect(() => {
+    if (value === settled) return undefined;
+
     // Clearing the box should be immediate: the user is asking to see the
     // full list again, and making them wait for a timer to expire before
     // anything happens reads as the page having hung.
-    if (value === settled) return undefined;
+    if (!value) {
+      setSettled(value);
+      return undefined;
+    }
 
     const timer = setTimeout(() => setSettled(value), delayMs);
     return () => clearTimeout(timer);

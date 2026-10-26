@@ -146,7 +146,14 @@ router.patch(
         where: { organizationId, name: { equals: body.name, mode: "insensitive" }, NOT: { id: location.id } },
       });
       if (nameTaken) {
-        throw ApiError.conflict("A location with this name already exists");
+        // Same two-sided message as POST / above: a clash with an archived
+        // location reads as a surprise otherwise, since the name is in no
+        // list the caller can see.
+        throw ApiError.conflict(
+          nameTaken.isActive
+            ? "A location with this name already exists"
+            : "An archived location already uses this name — restore or rename it"
+        );
       }
     }
 

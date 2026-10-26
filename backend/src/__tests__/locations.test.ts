@@ -398,6 +398,20 @@ describe("Archiving a location", () => {
     expect(res.status).toBe(409);
     expect(res.body.error).toMatch(/archived location already uses this name/i);
   });
+
+  it("names the archived location behind a rename clash too", async () => {
+    const { auth, locationId } = await setup();
+    await request(app).delete(`/api/locations/${locationId}`).set(auth);
+    const locations = await request(app).get("/api/locations?status=all").set(auth);
+    const other = locations.body.find((l: { id: string }) => l.id !== locationId);
+
+    const res = await request(app)
+      .patch(`/api/locations/${other.id}`)
+      .set(auth)
+      .send({ name: "Back Room" });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/archived location already uses this name/i);
+  });
 });
 
 describe("Recording stock against an archived location", () => {

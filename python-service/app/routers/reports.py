@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import secrets
 from datetime import datetime, timedelta, timezone
 from io import StringIO
 from typing import Any, Optional
@@ -27,7 +28,11 @@ router = APIRouter()
 # 3.10, at import time, taking the whole test suite down at collection. The
 # trap is that the failure is nowhere near the syntax that caused it.
 def require_internal_caller(x_internal_key: Optional[str] = Header(default=None)) -> None:
-    if x_internal_key != settings.internal_api_key:
+    # secrets.compare_digest instead of `!=`: this key is the entire access
+    # control story for the service (see test_internal_auth.py), and a
+    # plain string comparison short-circuits on the first mismatched byte —
+    # timing an attacker could use to recover the key one byte at a time.
+    if x_internal_key is None or not secrets.compare_digest(x_internal_key, settings.internal_api_key):
         raise HTTPException(status_code=401, detail="Missing or invalid internal API key")
 
 

@@ -127,6 +127,24 @@ describe("Archiving a category", () => {
   });
 });
 
+describe("Listing categories", () => {
+  it("never returns another organization's categories (tenant isolation)", async () => {
+    const authA = await signUp();
+    await createCategory(authA, "Shop A Category");
+
+    const otherSignup = await request(app).post("/api/auth/signup").send({
+      organizationName: "Other Shop",
+      name: "Other",
+      email: "ownerB@shop.test",
+      password: "hunter22222",
+    });
+    const authB = { Authorization: `Bearer ${otherSignup.body.accessToken}` };
+
+    const listAsB = await request(app).get("/api/categories").set(authB);
+    expect(listAsB.body).toEqual([]);
+  });
+});
+
 // PATCH /:id previously skipped straight to `prisma.category.update`, so a
 // rename onto an already-used name only ever hit the database's own
 // `@@unique([organizationId, name])` index — surfacing as the generic

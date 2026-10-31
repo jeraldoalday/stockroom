@@ -689,3 +689,69 @@ def test_fetch_stock_rows_scopes_to_the_organization_and_joins_product_and_locat
     assert rows[0]["sku"] == "WIDGET-1"
     assert rows[0]["location"] == "Main"
     assert int(rows[0]["quantity"]) == 42
+
+
+# --- Dead stock, against a real engine --------------------------------------
+#
+# fetch_dead_stock's three correlated subqueries were, like the products and
+# stock exports above, only ever hit through a monkeypatch -- a report whose
+# filtering is three LEFT JOINs and a HAVING-style WHERE clause is exactly
+# the kind of query where a result-shape assertion against a mocked function
+# can't catch a real mistake in the SQL text itself.
+def test_fetch_dead_stock_excludes_products_with_no_stock_or_a_recent_sale():
+    from app.services.dead_stock import fetch_dead_stock
+
+    engine = create_engine("sqlite:///:memory:")
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                'CREATE TABLE "products" (id TEXT, "organizationId" TEXT, sku TEXT, '
+                'name TEXT, "costCents" INTEGER, "isActive" INTEGER)'
+            )
+        )
+        conn.execute(
+            text(
+                'CREATE TABLE "inventory_items" (id TEXT, "organizationId" TEXT, '
+                '"productId" TEXT, quantity INTEGER)'
+            )
+        )
+        conn.execute(
+            text(
+                'CREATE TABLE "stock_movements" (id TEXT, "organizationId" TEXT, '
+                '"productId" TEXT, type TEXT, quantity INTEGER, "createdAt" TEXT)'
+            )
+        )
+        conn.execute(
+            text('INSERT INTO "products" VALUES (:id, :org, :sku, :name, :cost, :active)'),
+            [
+                # Holding stock, never sold -- dead stock.
+                dict(id="p_dead", org="org_1", sku="DUST-1", name="Dusty Widget", cost=500, active=1),
+                # Holding stock, but sold inside the window -- not dead.
+                dict(id="p_fresh", org="org_1", sku="FRESH-1", name="Fresh Widget", cost=500, active=1),
+                # No stock on hand at all -- not dead, nothing is tied up.
+                dict(id="p_empty", org="org_1", sku="EMPTY-1", name="Empty Widget", cost=500, active=1),
+                # Another organization's dead stock must not leak into org_1's report.
+                dict(id="p_other_org", org="org_2", sku="OTHER-1", name="Other Co's Widget", cost=500, active=1),
+            ],
+        )
+        conn.execute(
+            text('INSERT INTO "inventory_items" VALUES (:id, :org, :p, :qty)'),
+            [
+                dict(id="i_dead", org="org_1", p="p_dead", qty=10),
+                dict(id="i_fresh", org="org_1", p="p_fresh", qty=10),
+                dict(id="i_empty", org="org_1", p="p_empty", qty=0),
+                dict(id="i_other", org="org_2", p="p_other_org", qty=10),
+            ],
+        )
+        conn.execute(
+            text('INSERT INTO "stock_movements" VALUES (:id, :org, :p, :type, :qty, :created)'),
+            [
+                dict(id="m_fresh", org="org_1", p="p_fresh", type="SALE", qty=-2, created="2026-08-20T00:00:00+00:00"),
+            ],
+        )
+    since = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    with engine.connect() as conn:
+        rows = fetch_dead_stock(conn, "org_1", since)
+
+    assert [row["sku"] for row in rows] == ["DUST-1"]
+    assert int(rows[0]["quantity_on_hand"]) == 10

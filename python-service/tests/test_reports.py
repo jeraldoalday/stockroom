@@ -604,3 +604,88 @@ def test_movements_export_does_not_duplicate_a_row_for_a_sales_order_with_two_li
     # One row per movement, not one row per (movement x matching line).
     assert len(rows) == 2
     assert {row["quantity"] for row in rows} == {-5, -3}
+
+
+# --- Products and stock exports, against a real engine ---------------------
+#
+# Every other query in app/services touched by this test file gets exercised
+# against real SQL somewhere in here; fetch_products_rows and
+# fetch_stock_rows were only ever hit through a monkeypatch at the route
+# layer (test_export_products_returns_csv and friends), so a column-name
+# typo or a join that silently dropped or duplicated a row would pass the
+# whole suite. These run the actual SQL text, the same way the fan-out
+# tests above do.
+
+
+def test_fetch_products_rows_scopes_to_the_organization_and_joins_the_category():
+    from app.services.export import fetch_products_rows
+
+    engine = create_engine("sqlite:///:memory:")
+    with engine.begin() as conn:
+        conn.execute(text('CREATE TABLE "categories" (id TEXT, name TEXT)'))
+        conn.execute(
+            text(
+                'CREATE TABLE "products" (id TEXT, "organizationId" TEXT, sku TEXT, '
+                'name TEXT, "categoryId" TEXT, "costCents" INTEGER, "priceCents" INTEGER, '
+                '"reorderPoint" INTEGER, "reorderQty" INTEGER, "isActive" INTEGER)'
+            )
+        )
+        conn.execute(text('INSERT INTO "categories" VALUES (:id, :name)'), [dict(id="c_1", name="Gadgets")])
+        conn.execute(
+            text(
+                'INSERT INTO "products" VALUES '
+                "(:id, :org, :sku, :name, :cat, :cost, :price, :rp, :rq, :active)"
+            ),
+            [
+                # Scoped to org_1, with a category -- the row this test asserts on.
+                dict(id="p_1", org="org_1", sku="WIDGET-1", name="Widget", cat="c_1",
+                     cost=500, price=999, rp=5, rq=20, active=1),
+                # No category -- the LEFT JOIN must not drop it.
+                dict(id="p_2", org="org_1", sku="GIZMO-1", name="Gizmo", cat=None,
+                     cost=100, price=250, rp=2, rq=10, active=1),
+                # A different organization -- must not appear in org_1's export.
+                dict(id="p_3", org="org_2", sku="OTHER-1", name="Other Co's Widget", cat="c_1",
+                     cost=1, price=1, rp=1, rq=1, active=1),
+            ],
+        )
+    with engine.connect() as conn:
+        rows = fetch_products_rows(conn, "org_1")
+
+    assert {row["sku"] for row in rows} == {"WIDGET-1", "GIZMO-1"}
+    widget = next(row for row in rows if row["sku"] == "WIDGET-1")
+    assert widget["category"] == "Gadgets"
+    gizmo = next(row for row in rows if row["sku"] == "GIZMO-1")
+    assert gizmo["category"] is None
+
+
+def test_fetch_stock_rows_scopes_to_the_organization_and_joins_product_and_location():
+    from app.services.export import fetch_stock_rows
+
+    engine = create_engine("sqlite:///:memory:")
+    with engine.begin() as conn:
+        conn.execute(text('CREATE TABLE "products" (id TEXT, sku TEXT, name TEXT)'))
+        conn.execute(text('CREATE TABLE "locations" (id TEXT, name TEXT)'))
+        conn.execute(
+            text(
+                'CREATE TABLE "inventory_items" (id TEXT, "organizationId" TEXT, '
+                '"productId" TEXT, "locationId" TEXT, quantity INTEGER)'
+            )
+        )
+        conn.execute(text('INSERT INTO "products" VALUES (:id, :sku, :name)'), [dict(id="p_1", sku="WIDGET-1", name="Widget")])
+        conn.execute(text('INSERT INTO "locations" VALUES (:id, :name)'), [dict(id="l_1", name="Main")])
+        conn.execute(
+            text('INSERT INTO "inventory_items" VALUES (:id, :org, :p, :loc, :qty)'),
+            [
+                dict(id="i_1", org="org_1", p="p_1", loc="l_1", qty=42),
+                # A different organization's stock of the same product/location
+                # must not leak into org_1's export.
+                dict(id="i_2", org="org_2", p="p_1", loc="l_1", qty=999),
+            ],
+        )
+    with engine.connect() as conn:
+        rows = fetch_stock_rows(conn, "org_1")
+
+    assert len(rows) == 1
+    assert rows[0]["sku"] == "WIDGET-1"
+    assert rows[0]["location"] == "Main"
+    assert int(rows[0]["quantity"]) == 42

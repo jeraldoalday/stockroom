@@ -427,8 +427,33 @@ describe("ProductsPage CSV import", () => {
 
     await user.upload(fileInput(container), new File(["sku,name\n,Widget\n"], "products.csv", { type: "text/csv" }));
 
-    expect(await screen.findByText("Imported: 1 created, 0 updated, 1 row(s) skipped.")).toBeInTheDocument();
+    expect(await screen.findByText("Imported: 1 created, 0 updated, 1 row skipped.")).toBeInTheDocument();
     expect(screen.getByText("Row 3: Missing SKU")).toBeInTheDocument();
+  });
+
+  it("pluralizes the skipped-row count when more than one row fails", async () => {
+    api.on("GET", "/products", page([]));
+    api.on(
+      "POST",
+      "/products/import",
+      ok({
+        created: 0,
+        updated: 0,
+        errors: [
+          { row: 2, message: "Missing SKU" },
+          { row: 3, message: "Missing SKU" },
+        ],
+      })
+    );
+    const { user, container } = renderPage();
+    await screen.findByText("No products yet.");
+
+    await user.upload(
+      fileInput(container),
+      new File(["sku,name\n,Widget\n,Gadget\n"], "products.csv", { type: "text/csv" })
+    );
+
+    expect(await screen.findByText("Imported: 0 created, 0 updated, 2 rows skipped.")).toBeInTheDocument();
   });
 
   it("surfaces a rejected import rather than failing silently", async () => {

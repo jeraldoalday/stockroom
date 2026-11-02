@@ -305,7 +305,9 @@ export function ProductsPage() {
         <div className="mb-4 rounded-md border border-gray-200 bg-white p-3 text-sm">
           <div className="text-gray-700">
             Imported: {importResult.created} created, {importResult.updated} updated
-            {importResult.errors.length > 0 ? `, ${importResult.errors.length} row(s) skipped` : ""}.
+            {importResult.errors.length > 0
+              ? `, ${importResult.errors.length} row${importResult.errors.length === 1 ? "" : "s"} skipped`
+              : ""}.
           </div>
           {importResult.errors.length > 0 && (
             <ul role="alert" className="mt-2 list-disc pl-5 text-red-600">

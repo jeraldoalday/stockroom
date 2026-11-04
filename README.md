@@ -73,7 +73,9 @@ Everything CI runs, runnable locally:
 cd backend
 npm run typecheck      # includes prisma/seed.ts, which the build config skips
 npm run lint
-npm test
+npm test                # set STOCKROOM_TEST_DATABASE_URL to also run the
+                        # handful of tests that need a real Postgres rather
+                        # than the in-memory Prisma mock; skipped otherwise
 
 cd ../python-service
 pytest
